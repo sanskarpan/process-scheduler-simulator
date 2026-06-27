@@ -1,0 +1,19 @@
+services:
+  server:
+    build: .
+    image: scheduler-simulator:latest
+    ports:
+      - "${PORT:-8082}:8082"
+    environment:
+      PORT: "8082"
+      STATIC_DIR: "/app/web/static"
+      LOG_LEVEL: "info"
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
