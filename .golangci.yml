@@ -1,0 +1,45 @@
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.22"
+
+linters:
+  default: standard
+  enable:
+    - errcheck      # check unchecked errors
+    - gosimple      # simplifications
+    - govet         # go vet
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # static analysis
+    - unused        # find unused code
+    - misspell      # spelling
+    - revive        # golint successor, style
+    - gocritic      # diagnostics
+    - bodyclose     # http response body close
+    - nilerr       # nil error returns
+    - prealloc      # slice preallocation hints
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: exported
+          arguments: ["disableStutteringCheck"]
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-use-default: false
+  exclude-rules:
+    # Test files may use globals and be more lenient.
+    - path: _test\.go
+      linters: [prealloc, govet]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
