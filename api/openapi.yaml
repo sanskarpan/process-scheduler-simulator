@@ -1,0 +1,199 @@
+openapi: 3.0.3
+info:
+  title: Process Scheduler Simulator API
+  version: 1.0.0
+  description: |
+    Synchronous and interactive CPU scheduling simulation API.
+    Run simulations, retrieve past results, and list supported algorithms.
+servers:
+  - url: http://localhost:8082
+    description: Local development
+paths:
+  /api/version:
+    get:
+      summary: Get server version
+      operationId: getVersion
+      responses:
+        '200':
+          description: Server version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: dev
+  /api/algorithms:
+    get:
+      summary: List supported scheduling algorithms
+      operationId: listAlgorithms
+      responses:
+        '200':
+          description: List of algorithms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Algorithm'
+  /api/simulate:
+    post:
+      summary: Run a simulation synchronously
+      operationId: simulate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulateRequest'
+      responses:
+        '200':
+          description: Simulation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulateResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Simulation timed out (30s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/simulations:
+    get:
+      summary: List recent simulations
+      operationId: listSimulations
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 500
+      responses:
+        '200':
+          description: List of simulation records, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SimulationRecord'
+  /api/simulations/{id}:
+    get:
+      summary: Get a simulation by ID
+      operationId: getSimulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Simulation record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationRecord'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Algorithm:
+      type: object
+      properties:
+        id:
+          type: string
+          example: rr
+        name:
+          type: string
+          example: Round-Robin
+        preemptive:
+          type: boolean
+        needsQuantum:
+          type: boolean
+        description:
+          type: string
+    ProcessInput:
+      type: object
+      required: [pid, name, arrivalTime, burstTime, priority]
+      properties:
+        pid:
+          type: integer
+          minimum: 0
+        name:
+          type: string
+        arrivalTime:
+          type: integer
+          minimum: 0
+        burstTime:
+          type: integer
+          minimum: 0
+        priority:
+          type: integer
+    SimulateRequest:
+      type: object
+      required: [algorithm, processes]
+      properties:
+        algorithm:
+          type: string
+          example: fcfs
+          enum: [fcfs, sjf, srtf, rr, priority, priority_np, cfs, mlfq, lottery, mlq]
+        timeQuantum:
+          type: integer
+          default: 4
+        speed:
+          type: integer
+          description: ms per tick (ignored for synchronous API; runs at max speed)
+          default: 1
+        processes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessInput'
+    SimulateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        algorithm:
+          type: string
+        durationMs:
+          type: integer
+        state:
+          $ref: '#/components/schemas/SimulationState'
+    SimulationRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        algorithm:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+        config:
+          type: object
+        finalState:
+          $ref: '#/components/schemas/SimulationState'
+    SimulationState:
+      type: object
+      description: Full simulation snapshot (currentTime, ganttChart, metrics, etc.)
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
