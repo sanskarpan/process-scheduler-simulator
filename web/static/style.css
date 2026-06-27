@@ -1,0 +1,611 @@
+/* CSS Variables */
+:root {
+    --primary-color: #4A90E2;
+    --success-color: #50C878;
+    --warning-color: #F39C12;
+    --danger-color: #E74C3C;
+    --info-color: #3498DB;
+    --dark-bg: #1E1E2E;
+    --card-bg: #2A2A3E;
+    --text-primary: #E0E0E0;
+    --text-secondary: #B0B0B0;
+    --border-color: #3A3A4E;
+    --hover-bg: #3A3A4E;
+    --accent-1: #9B59B6;
+    --accent-2: #1ABC9C;
+}
+
+/* Global Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #1E1E2E 0%, #2A2A3E 100%);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header */
+header {
+    text-align: center;
+    padding: 2rem 0;
+    background: var(--card-bg);
+    border-radius: 10px;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    background: linear-gradient(135deg, var(--primary-color), var(--accent-1));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.connection-status {
+    position: absolute;
+    top: 1rem;
+    right: 2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-connected {
+    background-color: var(--success-color);
+    box-shadow: 0 0 10px var(--success-color);
+    animation: pulse 2s infinite;
+}
+
+.status-disconnected {
+    background-color: var(--danger-color);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Card */
+.card {
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+}
+
+.card h2 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+.card h3 {
+    color: var(--text-secondary);
+    margin: 1rem 0 0.5rem 0;
+    font-size: 1.1rem;
+}
+
+/* Configuration Section */
+.config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    align-items: end;
+}
+
+.config-item label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.config-item select,
+.config-item input[type="number"] {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--dark-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.config-item input[type="range"] {
+    width: 70%;
+    margin-right: 0.5rem;
+}
+
+#speedValue {
+    color: var(--primary-color);
+    font-weight: bold;
+}
+
+/* Process Management */
+.process-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.form-group input {
+    padding: 0.75rem;
+    background: var(--dark-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+/* Buttons */
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 5px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+
+.btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-success {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-warning {
+    background: var(--warning-color);
+    color: white;
+}
+
+.btn-danger {
+    background: var(--danger-color);
+    color: white;
+}
+
+.btn-info {
+    background: var(--info-color);
+    color: white;
+}
+
+.btn-secondary {
+    background: var(--text-secondary);
+    color: white;
+}
+
+/* Process List */
+.process-list {
+    margin-top: 1rem;
+}
+
+#processList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.process-chip {
+    padding: 0.5rem 1rem;
+    background: var(--dark-bg);
+    border-radius: 20px;
+    border: 2px solid var(--border-color);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.process-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.chip-remove {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+.chip-remove:hover {
+    color: var(--danger-color);
+    background: rgba(231, 76, 60, 0.15);
+}
+
+/* Simulation Controls */
+.control-section .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.current-time {
+    padding: 1rem;
+    background: var(--dark-bg);
+    border-radius: 5px;
+    font-size: 1.1rem;
+}
+
+#currentTime {
+    color: var(--primary-color);
+    font-weight: bold;
+    font-size: 1.3rem;
+}
+
+#currentAlgorithm {
+    color: var(--success-color);
+    font-weight: bold;
+}
+
+#simulationState {
+    color: var(--warning-color);
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+/* Visualization Grid */
+.viz-grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+/* Current Process & Queues */
+.current-process,
+.ready-queue,
+.completed-processes {
+    padding: 1rem;
+    background: var(--dark-bg);
+    border-radius: 5px;
+    min-height: 80px;
+}
+
+.no-process,
+.no-events {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 1rem;
+    font-style: italic;
+}
+
+.process-box {
+    padding: 1rem;
+    margin: 0.5rem 0;
+    background: var(--card-bg);
+    border-radius: 5px;
+    border-left: 4px solid;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.process-box strong {
+    color: var(--text-secondary);
+}
+
+/* Gantt Chart */
+.gantt-section {
+    grid-column: 2;
+}
+
+.gantt-chart {
+    background: var(--dark-bg);
+    border-radius: 5px;
+    padding: 1rem;
+    overflow-x: auto;
+    min-height: 200px;
+}
+
+.gantt-placeholder {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 4rem 1rem;
+    font-style: italic;
+}
+
+.gantt-container {
+    display: flex;
+    align-items: center;
+    min-height: 100px;
+}
+
+.gantt-entry {
+    height: 60px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    transition: all 0.3s ease;
+    font-weight: bold;
+    font-size: 0.9rem;
+}
+
+.gantt-entry:hover {
+    transform: scaleY(1.1);
+    z-index: 10;
+}
+
+.gantt-time {
+    display: flex;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.time-marker {
+    display: inline-flex;
+    justify-content: center;
+    border-right: 1px solid var(--border-color);
+}
+
+/* Metrics Section */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.metric {
+    padding: 1rem;
+    background: var(--dark-bg);
+    border-radius: 5px;
+    text-align: center;
+    border-left: 4px solid var(--primary-color);
+    transition: transform 0.3s ease;
+}
+
+.metric:hover {
+    transform: translateY(-5px);
+}
+
+.metric-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+}
+
+.metric-value {
+    color: var(--primary-color);
+    font-size: 1.8rem;
+    font-weight: bold;
+}
+
+/* Event Log */
+.event-log {
+    background: var(--dark-bg);
+    border-radius: 5px;
+    padding: 1rem;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.event-entry {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background: var(--card-bg);
+    border-radius: 5px;
+    border-left: 3px solid;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.event-time {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.event-description {
+    margin-top: 0.25rem;
+}
+
+.event-arrival { border-left-color: var(--success-color); }
+.event-start { border-left-color: var(--info-color); }
+.event-complete { border-left-color: var(--accent-1); }
+.event-preempt { border-left-color: var(--warning-color); }
+.event-quantum_expire { border-left-color: var(--danger-color); }
+
+/* Process Details Table */
+.table-container {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+}
+
+thead {
+    background: var(--dark-bg);
+}
+
+th {
+    padding: 1rem;
+    text-align: left;
+    color: var(--primary-color);
+    font-weight: 600;
+    border-bottom: 2px solid var(--border-color);
+}
+
+td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+tbody tr {
+    transition: background 0.2s ease;
+}
+
+tbody tr:hover {
+    background: var(--hover-bg);
+}
+
+.no-data {
+    text-align: center;
+    color: var(--text-secondary);
+    font-style: italic;
+    padding: 2rem !important;
+}
+
+.state-new { color: var(--text-secondary); }
+.state-ready { color: var(--info-color); }
+.state-running { color: var(--success-color); font-weight: bold; }
+.state-waiting { color: var(--warning-color); }
+.state-terminated { color: var(--accent-1); }
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+footer p {
+    margin: 0.5rem 0;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--dark-bg);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-1);
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+    .viz-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .gantt-section {
+        grid-column: 1;
+    }
+}
+
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 1.8rem;
+    }
+
+    .connection-status {
+        position: static;
+        justify-content: center;
+        margin-top: 1rem;
+    }
+
+    .config-grid,
+    .process-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .control-section .controls {
+        flex-direction: column;
+    }
+
+    .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .metrics-grid {
+        grid-template-columns: 1fr;
+    }
+}
