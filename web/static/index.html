@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Process Scheduler Simulator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>Process Scheduler Simulator</h1>
+            <div class="connection-status">
+                <span id="status-indicator" class="status-disconnected"></span>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Configuration Section -->
+        <section class="config-section">
+            <div class="card">
+                <h2>Configuration</h2>
+                <div class="config-grid">
+                    <div class="config-item">
+                        <label for="algorithm">Scheduling Algorithm:</label>
+                        <select id="algorithm">
+                            <option value="fcfs">FCFS (First-Come-First-Served)</option>
+                            <option value="sjf">SJF (Shortest Job First)</option>
+                            <option value="srtf">SRTF (Shortest Remaining Time First)</option>
+                            <option value="rr" selected>Round-Robin</option>
+                            <option value="priority">Priority (Preemptive)</option>
+                            <option value="priority_np">Priority (Non-Preemptive)</option>
+                            <option value="cfs">CFS (Completely Fair Scheduler)</option>
+                            <option value="mlfq">MLFQ (Multi-Level Feedback Queue)</option>
+                            <option value="lottery">Lottery (Proportional Share)</option>
+                            <option value="mlq">MLQ (Multi-Level Queue, Fixed)</option>
+                        </select>
+                    </div>
+
+                    <div class="config-item" id="timeQuantumConfig">
+                        <label for="timeQuantum">Time Quantum:</label>
+                        <input type="number" id="timeQuantum" value="4" min="1" max="20">
+                    </div>
+
+                    <div class="config-item">
+                        <label for="speed">Simulation Speed (ms):</label>
+                        <input type="range" id="speed" min="10" max="2000" value="100" step="10">
+                        <span id="speedValue">100 ms</span>
+                    </div>
+
+                    <div class="config-item">
+                        <button id="initBtn" class="btn btn-primary">Initialize Simulator</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Process Management Section -->
+        <section class="process-section">
+            <div class="card">
+                <h2>Process Management</h2>
+                <div class="process-controls">
+                    <div class="form-group">
+                        <label for="processName">Name:</label>
+                        <input type="text" id="processName" placeholder="P1">
+                    </div>
+                    <div class="form-group">
+                        <label for="arrivalTime">Arrival:</label>
+                        <input type="number" id="arrivalTime" value="0" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="burstTime">Burst:</label>
+                        <input type="number" id="burstTime" value="5" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="priority">Priority:</label>
+                        <input type="number" id="priority" value="0" min="0" max="10">
+                    </div>
+                    <div class="form-group">
+                        <button id="addProcessBtn" class="btn btn-success">Add Process</button>
+                    </div>
+                    <div class="form-group">
+                        <button id="loadDefaultBtn" class="btn btn-info">Load Default Set</button>
+                    </div>
+                </div>
+
+                <div class="process-list">
+                    <h3>Processes</h3>
+                    <div id="processList"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Simulation Controls -->
+        <section class="control-section">
+            <div class="card">
+                <h2>Simulation Controls</h2>
+                <div class="controls">
+                    <button id="startBtn" class="btn btn-success" disabled>
+                        <span class="icon">▶</span> Start
+                    </button>
+                    <button id="pauseBtn" class="btn btn-warning" disabled>
+                        <span class="icon">⏸</span> Pause
+                    </button>
+                    <button id="resumeBtn" class="btn btn-info" disabled>
+                        <span class="icon">▶</span> Resume
+                    </button>
+                    <button id="stepBtn" class="btn btn-secondary" disabled>
+                        <span class="icon">⏭</span> Step
+                    </button>
+                    <button id="resetBtn" class="btn btn-danger" disabled>
+                        <span class="icon">↻</span> Reset
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger" disabled>
+                        <span class="icon">⏹</span> Stop
+                    </button>
+                </div>
+                <div class="current-time">
+                    <strong>Current Time:</strong> <span id="currentTime">0</span>
+                    <strong style="margin-left: 2rem;">Algorithm:</strong> <span id="currentAlgorithm">-</span>
+                    <strong style="margin-left: 2rem;">State:</strong> <span id="simulationState">idle</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Visualization Grid -->
+        <div class="viz-grid">
+            <!-- Current Process & Ready Queue -->
+            <section class="card">
+                <h2>Current Execution</h2>
+                <div id="currentProcess" class="current-process">
+                    <div class="no-process">No process running</div>
+                </div>
+
+                <h3>Ready Queue</h3>
+                <div id="readyQueue" class="ready-queue">
+                    <div class="no-process">Empty</div>
+                </div>
+
+                <h3>Completed Processes</h3>
+                <div id="completedProcesses" class="completed-processes">
+                    <div class="no-process">None</div>
+                </div>
+            </section>
+
+            <!-- Gantt Chart -->
+            <section class="card gantt-section">
+                <h2>Gantt Chart</h2>
+                <div id="ganttChart" class="gantt-chart">
+                    <div class="gantt-placeholder">Gantt chart will appear here during simulation</div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Metrics Section -->
+        <section class="metrics-section">
+            <div class="card">
+                <h2>Scheduling Metrics</h2>
+                <div class="metrics-grid">
+                    <div class="metric">
+                        <div class="metric-label">Average Turnaround Time</div>
+                        <div class="metric-value" id="avgTurnaround">0.00</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Average Waiting Time</div>
+                        <div class="metric-value" id="avgWaiting">0.00</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Average Response Time</div>
+                        <div class="metric-value" id="avgResponse">0.00</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">CPU Utilization</div>
+                        <div class="metric-value" id="cpuUtil">0.00%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Throughput</div>
+                        <div class="metric-value" id="throughput">0.000</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Context Switches</div>
+                        <div class="metric-value" id="contextSwitches">0</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Total Processes</div>
+                        <div class="metric-value" id="totalProcesses">0</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Completed</div>
+                        <div class="metric-value" id="completedCount">0</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Event Log -->
+        <section class="events-section">
+            <div class="card">
+                <h2>Event Log</h2>
+                <div id="eventLog" class="event-log">
+                    <div class="no-events">No events yet</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Process Details Table -->
+        <section class="details-section">
+            <div class="card">
+                <h2>Process Details</h2>
+                <div class="table-container">
+                    <table id="processTable">
+                        <thead>
+                            <tr>
+                                <th>PID</th>
+                                <th>Name</th>
+                                <th>Arrival</th>
+                                <th>Burst</th>
+                                <th>Priority</th>
+                                <th>State</th>
+                                <th>Start</th>
+                                <th>Completion</th>
+                                <th>Turnaround</th>
+                                <th>Waiting</th>
+                                <th>Response</th>
+                            </tr>
+                        </thead>
+                        <tbody id="processTableBody">
+                            <tr>
+                                <td colspan="11" class="no-data">No processes</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer>
+            <p>Process Scheduler Simulator - Built with Go & WebSockets</p>
+            <p>Supports FCFS, SJF, SRTF, Round-Robin, Priority, CFS, and MLFQ scheduling algorithms</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
