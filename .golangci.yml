@@ -14,16 +14,17 @@ linters:
     - bodyclose
     - nilerr
     - prealloc
-  settings:
-    revive:
-      severity: warning
-      rules:
-        - name: exported
-          arguments: ["disableStutteringCheck"]
-    prealloc:
-      simple: true
-      range-loops: true
-      for-loops: true
+
+linters-settings:
+  revive:
+    severity: warning
+    rules:
+      - name: exported
+        arguments: ["disableStutteringCheck"]
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
 
 issues:
   max-issues-per-linter: 0
