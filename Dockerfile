@@ -2,7 +2,7 @@
 # Multi-stage build for the Process Scheduler Simulator.
 # Build context: repo root.
 
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /src
 
 # Cache module downloads.
