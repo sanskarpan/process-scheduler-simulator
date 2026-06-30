@@ -27,14 +27,16 @@ linters:
       simple: true
       range-loops: true
       for-loops: true
+  exclusions:
+    paths:
+      - _test\.go
+    linters:
+      - prealloc
+      - govet
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-use-default: false
-  exclude-rules:
-    - path: _test\.go
-      linters: [prealloc, govet]
 
 formatters:
   enable:
