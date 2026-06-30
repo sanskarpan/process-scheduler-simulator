@@ -22,20 +22,20 @@ import (
 // Server manages WebSocket connections and the simulator. It is safe for
 // concurrent use by many WebSocket handlers.
 type Server struct {
-	cfg        config.Config
-	mu         sync.RWMutex
-	simulator  *simulator.Simulator
-	clients    map[*websocket.Conn]struct{}
-	broadcast  chan *simulator.SimulationUpdate
-	server     *http.Server
-	closed     chan struct{}
-	closeOnce  sync.Once
+	cfg       config.Config
+	mu        sync.RWMutex
+	simulator *simulator.Simulator
+	clients   map[*websocket.Conn]struct{}
+	broadcast chan *simulator.SimulationUpdate
+	server    *http.Server
+	closed    chan struct{}
+	closeOnce sync.Once
 }
 
 // NewServer creates a new server with the given configuration.
 func NewServer(cfg config.Config) *Server {
 	s := &Server{
-		cfg:        cfg,
+		cfg:       cfg,
 		clients:   make(map[*websocket.Conn]struct{}),
 		broadcast: make(chan *simulator.SimulationUpdate, cfg.BroadcastBufferSize),
 		closed:    make(chan struct{}),
@@ -91,7 +91,7 @@ func (s *Server) handleBroadcasts() {
 		s.mu.RUnlock()
 
 		for _, c := range clients {
-			c.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+			_ = c.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
 			if err := c.WriteJSON(update); err != nil {
 				logging.Logger.Warn("websocket write error", "error", err)
 				metrics.IncWSError("write")
@@ -106,7 +106,7 @@ func (s *Server) unregisterClient(c *websocket.Conn) {
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
 		s.mu.Unlock()
-		c.Close()
+		_ = c.Close()
 		return
 	}
 	s.mu.Unlock()
@@ -123,7 +123,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if s.cfg.MaxClients > 0 && len(s.clients) >= s.cfg.MaxClients {
 		s.mu.Unlock()
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 	s.clients[conn] = struct{}{}
@@ -134,15 +134,15 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Send initial state if a simulator exists.
 	if sim := s.getSimulator(); sim != nil {
-		conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-		conn.WriteJSON(sim.GetCurrentState())
+		_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+		_ = conn.WriteJSON(sim.GetCurrentState())
 	}
 
 	// Reader loop. Each message is processed in handleMessage.
 	conn.SetReadLimit(s.cfg.WSReadLimit)
-	conn.SetReadDeadline(time.Now().Add(s.cfg.WSPongWait))
+	_ = conn.SetReadDeadline(time.Now().Add(s.cfg.WSPongWait))
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(s.cfg.WSPongWait))
+		_ = conn.SetReadDeadline(time.Now().Add(s.cfg.WSPongWait))
 		return nil
 	})
 
@@ -160,7 +160,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					return
 				}
-				conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+				_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
@@ -179,7 +179,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		n := len(s.clients)
 		s.mu.Unlock()
 		metrics.DecClient()
-		conn.Close()
+		_ = conn.Close()
 		logging.FromContext(r.Context()).Info("client disconnected", "clients", n)
 	}()
 
@@ -195,6 +195,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.handleMessage(conn, msg)
 	}
 }
+
 // getSimulator returns the current simulator under the read lock.
 func (s *Server) getSimulator() *simulator.Simulator {
 	s.mu.RLock()
@@ -372,8 +373,8 @@ func (s *Server) handleInit(conn *websocket.Conn, msg map[string]interface{}) {
 	s.sendSuccess(conn, "Simulator initialized")
 
 	// Send initial state
-	conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-	conn.WriteJSON(newSim.GetCurrentState())
+	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+	_ = conn.WriteJSON(newSim.GetCurrentState())
 }
 
 // handleStart starts the simulation
@@ -507,13 +508,13 @@ func (s *Server) handleGetState(conn *websocket.Conn) {
 		s.sendError(conn, "Simulator not initialized")
 		return
 	}
-	conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-	conn.WriteJSON(sim.GetCurrentState())
+	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+	_ = conn.WriteJSON(sim.GetCurrentState())
 }
 
 // sendSuccess sends a success message
 func (s *Server) sendSuccess(conn *websocket.Conn, message string) {
-	conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
 	response := map[string]interface{}{
 		"type":    "success",
 		"message": message,
@@ -525,7 +526,7 @@ func (s *Server) sendSuccess(conn *websocket.Conn, message string) {
 
 // sendError sends an error message
 func (s *Server) sendError(conn *websocket.Conn, message string) {
-	conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
 	response := map[string]interface{}{
 		"type":    "error",
 		"message": message,
@@ -557,7 +558,7 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		status["currentTime"] = state.CurrentTime
 	}
 
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // Shutdown gracefully stops the HTTP server, closes all WebSocket connections,
@@ -572,7 +573,7 @@ func (s *Server) Shutdown() {
 
 		s.mu.Lock()
 		for c := range s.clients {
-			c.Close()
+			_ = c.Close()
 			delete(s.clients, c)
 		}
 		s.mu.Unlock()

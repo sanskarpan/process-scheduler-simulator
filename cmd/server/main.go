@@ -77,7 +77,7 @@ func main() {
 	}
 	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"version":"` + buildVersion + `"}`))
+		_, _ = w.Write([]byte(`{"version":"` + buildVersion + `"}`))
 	})
 
 	// Wrap mux with middleware (outermost first).

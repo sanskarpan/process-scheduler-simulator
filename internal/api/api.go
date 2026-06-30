@@ -20,9 +20,9 @@ import (
 
 // Handler holds dependencies for the REST API handlers.
 type Handler struct {
-	store         *store.Store
+	store          *store.Store
 	defaultQuantum int
-	defaultSpeed  int
+	defaultSpeed   int
 }
 
 // NewHandler returns a REST API handler.
@@ -41,27 +41,27 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 // Algorithm describes a supported scheduling algorithm.
 type Algorithm struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Preemptive  bool   `json:"preemptive"`
-	NeedsQuantum bool  `json:"needsQuantum"`
-	Description string `json:"description"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Preemptive   bool   `json:"preemptive"`
+	NeedsQuantum bool   `json:"needsQuantum"`
+	Description  string `json:"description"`
 }
 
 // simulateRequest is the JSON body for POST /api/simulate.
 type simulateRequest struct {
-	Algorithm   string             `json:"algorithm"`
-	TimeQuantum int                `json:"timeQuantum,omitempty"`
-	Speed       int                `json:"speed,omitempty"`
+	Algorithm   string               `json:"algorithm"`
+	TimeQuantum int                  `json:"timeQuantum,omitempty"`
+	Speed       int                  `json:"speed,omitempty"`
 	Processes   []store.ProcessInput `json:"processes"`
 }
 
 // simulateResponse is the JSON body for a successful simulation.
 type simulateResponse struct {
-	ID        string                       `json:"id"`
-	Algorithm string                       `json:"algorithm"`
+	ID         string                      `json:"id"`
+	Algorithm  string                      `json:"algorithm"`
 	DurationMs int64                       `json:"durationMs"`
-	State     *simulator.SimulationUpdate  `json:"state"`
+	State      *simulator.SimulationUpdate `json:"state"`
 }
 
 func (h *Handler) handleVersion(w http.ResponseWriter, r *http.Request) {

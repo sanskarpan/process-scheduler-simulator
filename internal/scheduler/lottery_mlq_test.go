@@ -106,7 +106,7 @@ func TestMLQPreempt(t *testing.T) {
 
 func TestMLQClampsPriority(t *testing.T) {
 	s := NewMLQScheduler(3, 4)
-	pHigh := process.NewProcess(1, "P1", 0, 2, 0)  // level 0
+	pHigh := process.NewProcess(1, "P1", 0, 2, 0) // level 0
 	pLow := process.NewProcess(2, "P2", 0, 2, 99) // clamped to level 2
 	s.AddProcess(pHigh)
 	s.AddProcess(pLow)

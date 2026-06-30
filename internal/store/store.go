@@ -12,9 +12,9 @@ import (
 
 // Record is a completed simulation snapshot.
 type Record struct {
-	ID         string                       `json:"id"`
-	Algorithm  string                       `json:"algorithm"`
-	CreatedAt  time.Time                    `json:"createdAt"`
+	ID         string                      `json:"id"`
+	Algorithm  string                      `json:"algorithm"`
+	CreatedAt  time.Time                   `json:"createdAt"`
 	Duration   time.Duration               `json:"duration"`
 	Config     SimulationConfig            `json:"config"`
 	FinalState *simulator.SimulationUpdate `json:"finalState"`
@@ -22,19 +22,19 @@ type Record struct {
 
 // SimulationConfig is the input configuration that produced a simulation.
 type SimulationConfig struct {
-	Algorithm    string         `json:"algorithm"`
-	TimeQuantum  int            `json:"timeQuantum,omitempty"`
-	Speed        int            `json:"speed"`
-	Processes    []ProcessInput `json:"processes"`
+	Algorithm   string         `json:"algorithm"`
+	TimeQuantum int            `json:"timeQuantum,omitempty"`
+	Speed       int            `json:"speed"`
+	Processes   []ProcessInput `json:"processes"`
 }
 
 // ProcessInput is the JSON shape for a process in a simulation request.
 type ProcessInput struct {
-	PID       int    `json:"pid"`
-	Name      string `json:"name"`
-	Arrival   int    `json:"arrivalTime"`
-	Burst     int    `json:"burstTime"`
-	Priority  int    `json:"priority"`
+	PID      int    `json:"pid"`
+	Name     string `json:"name"`
+	Arrival  int    `json:"arrivalTime"`
+	Burst    int    `json:"burstTime"`
+	Priority int    `json:"priority"`
 }
 
 // Store keeps the last `capacity` completed simulation records in memory.

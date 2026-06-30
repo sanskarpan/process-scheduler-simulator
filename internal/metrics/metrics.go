@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -49,8 +50,8 @@ var (
 
 func init() {
 	registry = prometheus.NewRegistry()
-	registry.MustRegister(prometheus.NewGoCollector())
-	registry.MustRegister(prometheus.NewBuildInfoCollector())
+	registry.MustRegister(collectors.NewGoCollector())
+	registry.MustRegister(collectors.NewBuildInfoCollector())
 	register(registry)
 }
 

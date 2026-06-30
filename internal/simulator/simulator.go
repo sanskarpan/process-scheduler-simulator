@@ -22,23 +22,23 @@ const (
 
 // Simulator manages the scheduling simulation
 type Simulator struct {
-	scheduler         scheduler.Scheduler
-	processes         []*process.Process
-	readyQueue        []*process.Process
-	currentProcess    *process.Process
-	currentTime       int
-	ganttChart        []process.GanttEntry
-	events            []process.ProcessEvent
-	contextSwitches   int
-	state             SimulationState
-	speed             int // Milliseconds per time unit
-	mu                sync.RWMutex
-	pauseChan         chan bool
-	stopChan          chan bool
-	updateCallback    func(*SimulationUpdate)
-	lastGanttUpdate   int
-	totalIdleTime     int
-	timeQuantumUsed   int // Track time used in current quantum
+	scheduler       scheduler.Scheduler
+	processes       []*process.Process
+	readyQueue      []*process.Process
+	currentProcess  *process.Process
+	currentTime     int
+	ganttChart      []process.GanttEntry
+	events          []process.ProcessEvent
+	contextSwitches int
+	state           SimulationState
+	speed           int // Milliseconds per time unit
+	mu              sync.RWMutex
+	pauseChan       chan bool
+	stopChan        chan bool
+	updateCallback  func(*SimulationUpdate)
+	lastGanttUpdate int
+	totalIdleTime   int
+	timeQuantumUsed int // Track time used in current quantum
 }
 
 // SimulationUpdate contains data sent to clients during simulation
@@ -57,15 +57,15 @@ type SimulationUpdate struct {
 // NewSimulator creates a new simulator with the given scheduler
 func NewSimulator(scheduler scheduler.Scheduler) *Simulator {
 	return &Simulator{
-		scheduler:      scheduler,
-		processes:      make([]*process.Process, 0),
-		readyQueue:     make([]*process.Process, 0),
-		ganttChart:     make([]process.GanttEntry, 0),
-		events:         make([]process.ProcessEvent, 0),
-		state:          SimStateIdle,
-		speed:          100, // 100ms per time unit by default
-		pauseChan:      make(chan bool, 1),
-		stopChan:       make(chan bool, 1),
+		scheduler:       scheduler,
+		processes:       make([]*process.Process, 0),
+		readyQueue:      make([]*process.Process, 0),
+		ganttChart:      make([]process.GanttEntry, 0),
+		events:          make([]process.ProcessEvent, 0),
+		state:           SimStateIdle,
+		speed:           100, // 100ms per time unit by default
+		pauseChan:       make(chan bool, 1),
+		stopChan:        make(chan bool, 1),
 		timeQuantumUsed: 0,
 	}
 }
@@ -257,6 +257,7 @@ func (s *Simulator) run() {
 		case <-s.pauseChan:
 			// Paused. Stop the periodic ticker and wait for resume/stop.
 			ticker.Stop()
+		pausedLoop:
 			for {
 				select {
 				case <-s.pauseChan:
@@ -265,12 +266,10 @@ func (s *Simulator) run() {
 					speed := s.speed
 					s.mu.RUnlock()
 					ticker = time.NewTicker(time.Duration(speed) * time.Millisecond)
-					break
+					break pausedLoop
 				case <-s.stopChan:
 					return
 				}
-				// Reached only after resume.
-				break
 			}
 
 		case <-ticker.C:
@@ -318,12 +317,10 @@ func (s *Simulator) executeTimeUnit() {
 	// Schedule next process if needed
 	if s.currentProcess == nil || s.currentProcess.IsComplete() {
 		s.scheduleNextProcess()
-	} else {
+	} else if s.shouldPreempt() {
 		// Check for preemption
-		if s.shouldPreempt() {
-			s.preemptCurrentProcess()
-			s.scheduleNextProcess()
-		}
+		s.preemptCurrentProcess()
+		s.scheduleNextProcess()
 	}
 
 	// Execute current process for one time unit

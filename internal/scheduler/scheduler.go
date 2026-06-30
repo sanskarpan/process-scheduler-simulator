@@ -60,15 +60,15 @@ func (s *FCFSScheduler) Schedule(readyQueue []*process.Process, currentTime int)
 	return earliest
 }
 
-func (s *FCFSScheduler) AddProcess(p *process.Process)                          {}
-func (s *FCFSScheduler) RemoveProcess(p *process.Process)                       {}
+func (s *FCFSScheduler) AddProcess(p *process.Process)    {}
+func (s *FCFSScheduler) RemoveProcess(p *process.Process) {}
 func (s *FCFSScheduler) Preempt(current *process.Process, readyQueue []*process.Process, currentTime int) bool {
 	return false // FCFS is non-preemptive
 }
-func (s *FCFSScheduler) Name() string                  { return s.name }
-func (s *FCFSScheduler) QuantumFor(p *process.Process) int { return 0 }
+func (s *FCFSScheduler) Name() string                        { return s.name }
+func (s *FCFSScheduler) QuantumFor(p *process.Process) int   { return 0 }
 func (s *FCFSScheduler) OnQuantumExpired(p *process.Process) {}
-func (s *FCFSScheduler) Reset()                        {}
+func (s *FCFSScheduler) Reset()                              {}
 
 // SJFScheduler implements Shortest Job First (non-preemptive)
 type SJFScheduler struct {
@@ -95,15 +95,15 @@ func (s *SJFScheduler) Schedule(readyQueue []*process.Process, currentTime int) 
 	return shortest
 }
 
-func (s *SJFScheduler) AddProcess(p *process.Process)                          {}
-func (s *SJFScheduler) RemoveProcess(p *process.Process)                       {}
+func (s *SJFScheduler) AddProcess(p *process.Process)    {}
+func (s *SJFScheduler) RemoveProcess(p *process.Process) {}
 func (s *SJFScheduler) Preempt(current *process.Process, readyQueue []*process.Process, currentTime int) bool {
 	return false // SJF is non-preemptive
 }
-func (s *SJFScheduler) Name() string                  { return s.name }
-func (s *SJFScheduler) QuantumFor(p *process.Process) int { return 0 }
+func (s *SJFScheduler) Name() string                        { return s.name }
+func (s *SJFScheduler) QuantumFor(p *process.Process) int   { return 0 }
 func (s *SJFScheduler) OnQuantumExpired(p *process.Process) {}
-func (s *SJFScheduler) Reset()                        {}
+func (s *SJFScheduler) Reset()                              {}
 
 // SRTFScheduler implements Shortest Remaining Time First (preemptive SJF)
 type SRTFScheduler struct {
@@ -144,10 +144,10 @@ func (s *SRTFScheduler) Preempt(current *process.Process, readyQueue []*process.
 	}
 	return false
 }
-func (s *SRTFScheduler) Name() string                  { return s.name }
-func (s *SRTFScheduler) QuantumFor(p *process.Process) int { return 0 }
+func (s *SRTFScheduler) Name() string                        { return s.name }
+func (s *SRTFScheduler) QuantumFor(p *process.Process) int   { return 0 }
 func (s *SRTFScheduler) OnQuantumExpired(p *process.Process) {}
-func (s *SRTFScheduler) Reset()                        {}
+func (s *SRTFScheduler) Reset()                              {}
 
 // RoundRobinScheduler implements Round-Robin scheduling. The engine owns the
 // ready queue and rotates processes through it on quantum expiry; this type
@@ -182,15 +182,15 @@ func (s *RoundRobinScheduler) Preempt(current *process.Process, readyQueue []*pr
 	return false
 }
 
-func (s *RoundRobinScheduler) Name() string                  { return s.name }
-func (s *RoundRobinScheduler) QuantumFor(p *process.Process) int { return s.timeQuantum }
+func (s *RoundRobinScheduler) Name() string                        { return s.name }
+func (s *RoundRobinScheduler) QuantumFor(p *process.Process) int   { return s.timeQuantum }
 func (s *RoundRobinScheduler) OnQuantumExpired(p *process.Process) {}
-func (s *RoundRobinScheduler) Reset()                        {}
+func (s *RoundRobinScheduler) Reset()                              {}
 
 // PriorityScheduler implements Priority scheduling (preemptive)
 type PriorityScheduler struct {
-	name        string
-	preemptive  bool
+	name       string
+	preemptive bool
 }
 
 func NewPriorityScheduler(preemptive bool) *PriorityScheduler {
@@ -234,10 +234,10 @@ func (s *PriorityScheduler) Preempt(current *process.Process, readyQueue []*proc
 	}
 	return false
 }
-func (s *PriorityScheduler) Name() string                  { return s.name }
-func (s *PriorityScheduler) QuantumFor(p *process.Process) int { return 0 }
+func (s *PriorityScheduler) Name() string                        { return s.name }
+func (s *PriorityScheduler) QuantumFor(p *process.Process) int   { return 0 }
 func (s *PriorityScheduler) OnQuantumExpired(p *process.Process) {}
-func (s *PriorityScheduler) Reset()                        {}
+func (s *PriorityScheduler) Reset()                              {}
 
 // CFSScheduler implements a Completely Fair Scheduler (Linux-like). It picks
 // the runnable process with the smallest virtual runtime. The engine owns the
@@ -287,10 +287,10 @@ func (s *CFSScheduler) Preempt(current *process.Process, readyQueue []*process.P
 	return minVruntime < current.VRuntime-int64(s.minGranularity*1024/current.Weight)
 }
 
-func (s *CFSScheduler) Name() string                  { return s.name }
-func (s *CFSScheduler) QuantumFor(p *process.Process) int { return s.minGranularity }
+func (s *CFSScheduler) Name() string                        { return s.name }
+func (s *CFSScheduler) QuantumFor(p *process.Process) int   { return s.minGranularity }
 func (s *CFSScheduler) OnQuantumExpired(p *process.Process) {}
-func (s *CFSScheduler) Reset()                        {}
+func (s *CFSScheduler) Reset()                              {}
 
 // MLFQScheduler implements a Multi-Level Feedback Queue. Processes start at
 // the highest-priority level (0) and are demoted one level each time they
@@ -395,8 +395,8 @@ func (s *MLFQScheduler) Reset() {
 // uniform random draw picks the winner for the current tick. It is
 // preemptive only via quantum expiry.
 type LotteryScheduler struct {
-	name   string
-	rng    RNG
+	name    string
+	rng     RNG
 	quantum int
 }
 
@@ -481,8 +481,8 @@ func (s *LotteryScheduler) RemoveProcess(p *process.Process) {}
 func (s *LotteryScheduler) Preempt(current *process.Process, readyQueue []*process.Process, currentTime int) bool {
 	return false
 }
-func (s *LotteryScheduler) Name() string                  { return s.name }
-func (s *LotteryScheduler) QuantumFor(p *process.Process) int { return s.quantum }
+func (s *LotteryScheduler) Name() string                        { return s.name }
+func (s *LotteryScheduler) QuantumFor(p *process.Process) int   { return s.quantum }
 func (s *LotteryScheduler) OnQuantumExpired(p *process.Process) {}
 func (s *LotteryScheduler) Reset() {
 	if r, ok := s.rng.(*deterministicRNG); ok {
@@ -495,10 +495,10 @@ func (s *LotteryScheduler) Reset() {
 // queue, and higher queues are served before lower ones (strict priority). The
 // quantum is per-queue, defaulting to the scheduler's default quantum.
 type MLQScheduler struct {
-	name         string
-	numLevels    int
-	quantum      int
-	levels       map[int]int // PID -> level
+	name      string
+	numLevels int
+	quantum   int
+	levels    map[int]int // PID -> level
 }
 
 // NewMLQScheduler creates an MLQ scheduler with numLevels queues. If a

@@ -14,10 +14,10 @@ import (
 // Config holds all server runtime configuration.
 type Config struct {
 	// HTTP
-	Port           string        // listen port, e.g. ":8082"
-	ReadTimeout    time.Duration // header read timeout
-	WriteTimeout   time.Duration // write timeout (0 = no deadline, needed for WS)
-	IdleTimeout    time.Duration // keep-alive idle timeout
+	Port            string        // listen port, e.g. ":8082"
+	ReadTimeout     time.Duration // header read timeout
+	WriteTimeout    time.Duration // write timeout (0 = no deadline, needed for WS)
+	IdleTimeout     time.Duration // keep-alive idle timeout
 	ShutdownTimeout time.Duration
 
 	// Static files
@@ -28,7 +28,7 @@ type Config struct {
 	LogFormat string // json, text
 
 	// Simulation defaults
-	DefaultSpeed      int // ms per tick
+	DefaultSpeed       int // ms per tick
 	DefaultTimeQuantum int // default RR quantum
 
 	// Broadcast
@@ -36,11 +36,11 @@ type Config struct {
 	MaxClients          int // 0 = unlimited
 
 	// WebSocket
-	WSReadLimit     int64         // max inbound message bytes
-	WSWriteWait     time.Duration // write deadline
-	WSPongWait      time.Duration // read deadline (pong)
-	WSPingPeriod    time.Duration // ping interval
-	WSOriginAllow   []string      // allowed origins beyond same-origin
+	WSReadLimit   int64         // max inbound message bytes
+	WSWriteWait   time.Duration // write deadline
+	WSPongWait    time.Duration // read deadline (pong)
+	WSPingPeriod  time.Duration // ping interval
+	WSOriginAllow []string      // allowed origins beyond same-origin
 
 	// Feature flags
 	EnableMetrics bool // expose /metrics

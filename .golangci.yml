@@ -1,7 +1,10 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
+  default: standard
   enable:
     - errcheck
     - govet
@@ -14,17 +17,16 @@ linters:
     - bodyclose
     - nilerr
     - prealloc
-
-linters-settings:
-  revive:
-    severity: warning
-    rules:
-      - name: exported
-        arguments: ["disableStutteringCheck"]
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: true
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: exported
+          disabled: true
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
 
 issues:
   max-issues-per-linter: 0
@@ -33,3 +35,8 @@ issues:
   exclude-rules:
     - path: _test\.go
       linters: [prealloc, govet]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

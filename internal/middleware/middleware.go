@@ -3,7 +3,6 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -158,7 +157,3 @@ func Chain(h http.Handler, mws ...func(http.Handler) http.Handler) http.Handler 
 	}
 	return h
 }
-
-// nopContext is used to satisfy linters that require context propagation; kept
-// private to avoid API surface.
-type nopContext struct{ context.Context }

@@ -35,27 +35,27 @@ func (s ProcessState) String() string {
 
 // Process represents a simulated process in the scheduler
 type Process struct {
-	PID            int           // Process ID
-	Name           string        // Process name
-	ArrivalTime    int           // Time when process arrives
-	BurstTime      int           // Total CPU time required
-	RemainingTime  int           // Remaining CPU time
-	Priority       int           // Priority level (lower number = higher priority)
-	State          ProcessState  // Current state
-	StartTime      int           // Time when first executed (for response time)
-	CompletionTime int           // Time when process completes
-	WaitingTime    int           // Total time spent waiting
-	TurnaroundTime int           // Completion - Arrival time
-	ResponseTime   int           // Start - Arrival time
-	LastExecuted   int           // Last time this process was executed
-	TimeQuantum    int           // For round-robin (time slice used)
-	VRuntime       int64         // Virtual runtime for CFS
-	Nice           int           // Nice value for CFS (-20 to 19)
-	Weight         int           // Weight for CFS scheduling
-	IOBursts       []IOBurst     // I/O operations
-	CurrentIOIndex int           // Current I/O operation index
-	Color          string        // Color for visualization
-	HasStarted     bool          // Internal flag to track first execution
+	PID            int          // Process ID
+	Name           string       // Process name
+	ArrivalTime    int          // Time when process arrives
+	BurstTime      int          // Total CPU time required
+	RemainingTime  int          // Remaining CPU time
+	Priority       int          // Priority level (lower number = higher priority)
+	State          ProcessState // Current state
+	StartTime      int          // Time when first executed (for response time)
+	CompletionTime int          // Time when process completes
+	WaitingTime    int          // Total time spent waiting
+	TurnaroundTime int          // Completion - Arrival time
+	ResponseTime   int          // Start - Arrival time
+	LastExecuted   int          // Last time this process was executed
+	TimeQuantum    int          // For round-robin (time slice used)
+	VRuntime       int64        // Virtual runtime for CFS
+	Nice           int          // Nice value for CFS (-20 to 19)
+	Weight         int          // Weight for CFS scheduling
+	IOBursts       []IOBurst    // I/O operations
+	CurrentIOIndex int          // Current I/O operation index
+	Color          string       // Color for visualization
+	HasStarted     bool         // Internal flag to track first execution
 }
 
 // IOBurst represents an I/O operation
@@ -228,8 +228,8 @@ type GanttEntry struct {
 
 // SchedulingMetrics holds overall scheduling performance metrics
 type SchedulingMetrics struct {
-	TotalProcesses       int
-	CompletedProcesses   int
+	TotalProcesses        int
+	CompletedProcesses    int
 	AverageTurnaroundTime float64
 	AverageWaitingTime    float64
 	AverageResponseTime   float64
