@@ -30,9 +30,6 @@ linters:
   exclusions:
     paths:
       - _test\.go
-    linters:
-      - prealloc
-      - govet
 
 issues:
   max-issues-per-linter: 0
