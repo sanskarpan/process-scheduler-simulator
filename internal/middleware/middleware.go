@@ -3,6 +3,9 @@
 package middleware
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -34,6 +37,25 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.bytes += n
 	return n, err
+}
+
+// Hijack delegates to the underlying ResponseWriter's Hijacker interface so
+// that WebSocket upgrades (which require http.Hijacker) work through the
+// logging middleware without a 500 "does not implement http.Hijacker" error.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("statusWriter: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return h.Hijack()
+}
+
+// Flush delegates to the underlying ResponseWriter's Flusher interface for
+// streaming responses (SSE, chunked transfers).
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // RequestID injects a request ID into the request context and response

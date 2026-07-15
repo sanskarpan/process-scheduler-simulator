@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -84,5 +86,43 @@ func TestCORSNoListNoHeader(t *testing.T) {
 	got := rec.Header().Get("Access-Control-Allow-Origin")
 	if got != "" {
 		t.Errorf("ACAO = %q for empty allowlist, want empty string", got)
+	}
+}
+
+// ISSUE-044: statusWriter must forward http.Hijacker for WebSocket upgrades.
+
+// hijackableRecorder embeds httptest.ResponseRecorder and implements
+// http.Hijacker so we can test that statusWriter delegates the call.
+type hijackableRecorder struct {
+	*httptest.ResponseRecorder
+	hijackCalled bool
+}
+
+func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h.hijackCalled = true
+	return nil, nil, nil
+}
+
+func TestStatusWriterForwardsHijack(t *testing.T) {
+	hr := &hijackableRecorder{ResponseRecorder: httptest.NewRecorder()}
+	sw := &statusWriter{ResponseWriter: hr}
+
+	_, _, err := sw.Hijack()
+	if err != nil {
+		t.Fatalf("Hijack returned unexpected error: %v", err)
+	}
+	if !hr.hijackCalled {
+		t.Error("Hijack() was not forwarded to the underlying ResponseWriter")
+	}
+}
+
+func TestStatusWriterHijackErrorsOnNonHijacker(t *testing.T) {
+	// httptest.ResponseRecorder does not implement http.Hijacker
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec}
+
+	_, _, err := sw.Hijack()
+	if err == nil {
+		t.Error("expected error when underlying ResponseWriter does not implement http.Hijacker, got nil")
 	}
 }

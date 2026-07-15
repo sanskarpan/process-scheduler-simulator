@@ -358,6 +358,25 @@ func (s *Server) handleInit(wc *wsConn, msg map[string]interface{}) {
 		return
 	}
 
+	// Validate and collect processes BEFORE stopping the old simulator so that
+	// a parse error leaves s.simulator pointing to the still-running old sim.
+	var parsedProcs []*process.Process
+	if processesData, ok := msg["processes"].([]interface{}); ok {
+		for _, pData := range processesData {
+			pMap, ok := pData.(map[string]interface{})
+			if !ok {
+				s.sendError(wc, "Invalid process entry: expected object")
+				return
+			}
+			proc, err := parseProcess(pMap)
+			if err != nil {
+				s.sendError(wc, fmt.Sprintf("Invalid process data: %v", err))
+				return
+			}
+			parsedProcs = append(parsedProcs, proc)
+		}
+	}
+
 	// Stop the prior simulator (if any) before replacing it, so its engine
 	// goroutine exits cleanly and does not leak.
 	if old := s.getSimulator(); old != nil {
@@ -376,21 +395,8 @@ func (s *Server) handleInit(wc *wsConn, msg map[string]interface{}) {
 		}
 	})
 
-	// Add processes if provided
-	if processesData, ok := msg["processes"].([]interface{}); ok {
-		for _, pData := range processesData {
-			pMap, ok := pData.(map[string]interface{})
-			if !ok {
-				s.sendError(wc, "Invalid process entry: expected object")
-				return
-			}
-			proc, err := parseProcess(pMap)
-			if err != nil {
-				s.sendError(wc, fmt.Sprintf("Invalid process data: %v", err))
-				return
-			}
-			newSim.AddProcess(proc)
-		}
+	for _, proc := range parsedProcs {
+		newSim.AddProcess(proc)
 	}
 
 	s.mu.Lock()
@@ -589,11 +595,16 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Shutdown() {
 	s.closeOnce.Do(func() {
 		close(s.closed)
-		close(s.broadcast) // unblocks handleBroadcasts goroutine
 
+		// Stop the simulator BEFORE closing the broadcast channel. The run()
+		// goroutine's update callback sends to s.broadcast; sending on a closed
+		// channel panics even inside a select, so we must guarantee run() has
+		// exited (via wg.Wait inside Stop) before we close the channel.
 		if sim := s.getSimulator(); sim != nil {
 			sim.Stop()
 		}
+
+		close(s.broadcast) // safe now: run() has exited and won't send again
 
 		s.mu.Lock()
 		for wc := range s.clients {

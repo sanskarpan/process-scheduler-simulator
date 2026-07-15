@@ -448,3 +448,76 @@ func TestGanttChartGeneration(t *testing.T) {
 			state.CurrentTime, lastEntry.EndTime)
 	}
 }
+
+// ISSUE-042: Stop() must wait for the run goroutine even when state==SimStateComplete.
+func TestStopAfterNaturalCompletion(t *testing.T) {
+	sim := NewSimulator(scheduler.NewFCFSScheduler())
+	p := process.NewProcess(1, "P1", 0, 1, 0)
+	sim.AddProcess(p)
+	sim.SetSpeed(1)
+
+	done := make(chan struct{})
+	sim.SetUpdateCallback(func(u *SimulationUpdate) {
+		if u.State == SimStateComplete {
+			close(done)
+		}
+	})
+	sim.Start()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("simulation did not complete within 5s")
+	}
+
+	// Stop must not hang even though state==SimStateComplete.
+	stopped := make(chan struct{})
+	go func() {
+		sim.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop() hung after natural completion (ISSUE-042)")
+	}
+	if sim.state != SimStateIdle {
+		t.Errorf("state after Stop = %q, want idle", sim.state)
+	}
+}
+
+// ISSUE-043: Reset() must drain stopChan so the next Start() goroutine is not
+// immediately killed by a stale stop signal.
+func TestResetDrainsStopChan(t *testing.T) {
+	sim := NewSimulator(scheduler.NewFCFSScheduler())
+	p1 := process.NewProcess(1, "P1", 0, 3, 0)
+	sim.AddProcess(p1)
+	sim.SetSpeed(1)
+
+	done := make(chan struct{})
+	sim.SetUpdateCallback(func(u *SimulationUpdate) {
+		if u.State == SimStateComplete {
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+		}
+	})
+
+	// First run: let it complete naturally.
+	sim.Start()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first run did not complete within 5s")
+	}
+
+	// Reset then start again. Without the stopChan drain the second run would
+	// exit immediately and never produce a complete update.
+	sim.Reset()
+	sim.Start()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second run after Reset() did not complete within 5s (ISSUE-043: stale stopChan)")
+	}
+}

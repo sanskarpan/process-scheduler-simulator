@@ -175,17 +175,24 @@ func (s *Simulator) Step() {
 // returning. Subsequent calls are safe (no-ops if already stopped).
 func (s *Simulator) Stop() {
 	s.mu.Lock()
-	if s.state == SimStateRunning || s.state == SimStatePaused {
+	switch s.state {
+	case SimStateRunning, SimStatePaused:
 		s.state = SimStateIdle
 		s.mu.Unlock()
 		select {
 		case s.stopChan <- true:
 		default:
 		}
-		s.wg.Wait() // wait until run() calls wg.Done()
-		return
+		s.wg.Wait()
+	case SimStateComplete:
+		// run() set state=Complete and may still be in its final sendUpdate().
+		// Wait for wg.Done() so callers see a fully-exited goroutine.
+		s.state = SimStateIdle
+		s.mu.Unlock()
+		s.wg.Wait()
+	default:
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
 }
 
 // Reset resets the simulation to initial state. If a simulation is running it
@@ -195,9 +202,15 @@ func (s *Simulator) Reset() {
 	// Stop() guarantees the run goroutine has exited before returning.
 	s.Stop()
 
-	// Drain the pause signal only; stopChan was already consumed by run().
+	// Drain stale signals so the next goroutine does not immediately exit.
+	// stopChan may still hold a value if Stop() sent while run() exited via
+	// the natural-completion path (which returns without reading the channel).
 	select {
 	case <-s.pauseChan:
+	default:
+	}
+	select {
+	case <-s.stopChan:
 	default:
 	}
 

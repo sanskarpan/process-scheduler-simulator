@@ -90,7 +90,7 @@ func (h *Handler) handleAlgorithms(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSimulate(w http.ResponseWriter, r *http.Request) {
 	var req simulateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
@@ -252,8 +252,9 @@ func generateID(algorithm string, t time.Time) string {
 }
 
 // decodeJSON decodes the request body into dst with a size limit.
-func decodeJSON(r *http.Request, dst interface{}) error {
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
+// w is required so MaxBytesReader can send a 413 when the limit is exceeded.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
 }

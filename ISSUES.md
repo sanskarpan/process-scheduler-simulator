@@ -538,3 +538,52 @@ FINAL_REPORT.md. Severity: Critical / High / Medium / Low.
   tests. Result of the second simulation is silently discarded.
 - **Fix:** Append an atomic counter suffix: `fmt.Sprintf("%s-%s-%d", algorithm,
   t.Format(...), idCounter.Add(1))`.
+
+---
+
+## ISSUE-041 — Critical — `Shutdown()` closes broadcast channel before `sim.Stop()`, risking panic
+- **Affected components:** `web/server.go` (Shutdown)
+- **Description:** `Shutdown()` called `close(s.closed)` then `close(s.broadcast)` then `sim.Stop()`. The run goroutine's update callback includes `case s.broadcast <- update:` in a select; sending to a closed channel panics in Go even inside a select. Since `s.closed` is also closed, Go randomly picks between the send case (panic) and the receive case (safe), giving ~50% crash probability per outstanding update.
+- **Root cause:** Wrong ordering — `close(s.broadcast)` must happen after the run goroutine has fully exited via `sim.Stop()` → `wg.Wait()`.
+- **Impact:** Random server crash during graceful shutdown whenever a simulation was running.
+- **Fix:** Move `close(s.broadcast)` to after `sim.Stop()` in `Shutdown()`.
+
+---
+
+## ISSUE-042 — High — `Stop()` skips `wg.Wait()` when state is `SimStateComplete`, leaking the run goroutine
+- **Affected components:** `internal/simulator/simulator.go` (Stop)
+- **Description:** When `run()` sets `state=SimStateComplete` and enters `sendUpdate()`, a concurrent `Stop()` call sees state ≠ Running/Paused and returns immediately without calling `wg.Wait()`. The run goroutine is still alive. A subsequent `Start()` → `wg.Add(1)` → new goroutine means two goroutines race on simulation state.
+- **Root cause:** Missing `case SimStateComplete:` branch in `Stop()`.
+- **Fix:** Add a `case SimStateComplete:` that sets state to Idle and calls `wg.Wait()` to ensure the final `sendUpdate()` has returned.
+
+---
+
+## ISSUE-043 — High — `Reset()` does not drain `stopChan`; stale signal silently kills the next `Start()`
+- **Affected components:** `internal/simulator/simulator.go` (Reset)
+- **Description:** When `Stop()` sends to `stopChan` (buffered 1) and `run()` exits via the natural-completion path (line 313) without reading it, the signal remains buffered. `Reset()` drained `pauseChan` but not `stopChan` (and the comment "stopChan was already consumed by run()" was wrong for this race). The next `Start()` launches a goroutine that immediately reads the stale stop signal and exits.
+- **Root cause:** The drain was removed in the ISSUE-027 fix on the (incorrect) assumption that `run()` always consumes `stopChan` before exiting.
+- **Fix:** Restore `select { case <-s.stopChan: default: }` drain in `Reset()`.
+
+---
+
+## ISSUE-044 — High — `middleware.statusWriter` does not implement `http.Hijacker`; WebSocket upgrades always 500
+- **Affected components:** `internal/middleware/middleware.go` (statusWriter)
+- **Description:** The `LogAndMetrics` middleware wraps `http.ResponseWriter` in a `statusWriter` struct. gorilla/websocket calls `Hijack()` on the ResponseWriter during upgrade; since `statusWriter` does not implement `http.Hijacker`, the upgrade fails with "does not implement http.Hijacker" and the server returns 500 to every WebSocket client.
+- **Root cause:** `statusWriter` only embeds `http.ResponseWriter` for `Write`/`WriteHeader`; optional interfaces (`Hijacker`, `Flusher`) must be forwarded explicitly.
+- **Fix:** Add `Hijack()` and `Flush()` methods to `statusWriter` that delegate to the underlying `ResponseWriter`.
+
+---
+
+## ISSUE-045 — High — `handleInit` stops old simulator before validating process list; parse error leaves stale stopped sim
+- **Affected components:** `web/server.go` (handleInit)
+- **Description:** `old.Stop()` was called before iterating `processesData`. If any process failed validation, the function returned early without assigning `s.simulator = newSim`. `s.simulator` then pointed to the old (now-stopped) simulator. Subsequent `start`/`step` WS messages called `Start()` on the stopped sim, restarting its goroutine on stale state.
+- **Root cause:** Validation and side-effects were interleaved without a rollback path.
+- **Fix:** Parse and validate all processes into a local slice first; only call `old.Stop()` after successful validation.
+
+---
+
+## ISSUE-046 — Medium — `decodeJSON` passes `nil` ResponseWriter to `http.MaxBytesReader`
+- **Affected components:** `internal/api/api.go` (decodeJSON)
+- **Description:** `http.MaxBytesReader(nil, r.Body, 1<<20)` passes a nil `http.ResponseWriter`. In Go versions where `maxBytesReader` dereferences `w` to send a 413 status, this causes a nil pointer panic. Even in versions that return the error instead, `nil` is semantically wrong and may panic on future Go upgrades.
+- **Root cause:** `decodeJSON` did not receive the `ResponseWriter` parameter, so `nil` was used as a placeholder.
+- **Fix:** Add `w http.ResponseWriter` parameter to `decodeJSON` and pass the actual writer from `handleSimulate`.
