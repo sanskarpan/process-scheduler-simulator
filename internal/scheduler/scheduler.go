@@ -273,7 +273,7 @@ func (s *CFSScheduler) AddProcess(p *process.Process)    {}
 func (s *CFSScheduler) RemoveProcess(p *process.Process) {}
 
 func (s *CFSScheduler) Preempt(current *process.Process, readyQueue []*process.Process, currentTime int) bool {
-	if current == nil || len(readyQueue) <= 1 {
+	if current == nil || len(readyQueue) == 0 {
 		return false
 	}
 	// Find process with minimum vruntime among others
@@ -283,8 +283,9 @@ func (s *CFSScheduler) Preempt(current *process.Process, readyQueue []*process.P
 			minVruntime = p.VRuntime
 		}
 	}
-	// Preempt if another process has significantly lower vruntime
-	return minVruntime < current.VRuntime-int64(s.minGranularity*1024/current.Weight)
+	// Preempt if another process has significantly lower vruntime.
+	// Uses the same VRuntimeScale as process.Execute to keep units consistent.
+	return minVruntime < current.VRuntime-int64(s.minGranularity)*process.VRuntimeScale/int64(current.Weight)
 }
 
 func (s *CFSScheduler) Name() string                        { return s.name }
@@ -295,13 +296,13 @@ func (s *CFSScheduler) Reset()                              {}
 // MLFQScheduler implements a Multi-Level Feedback Queue. Processes start at
 // the highest-priority level (0) and are demoted one level each time they
 // exhaust their quantum, down to the lowest level. Each level has its own
-// (increasing) time quantum. Level membership is tracked internally by PID so
-// the user-supplied Priority field is not mutated.
+// (increasing) time quantum. Level membership is tracked by process pointer
+// so that duplicate PIDs do not alias each other's level.
 type MLFQScheduler struct {
 	name         string
 	timeQuantums []int // Time quantum for each level
 	numLevels    int
-	levels       map[int]int // PID -> level
+	levels       map[*process.Process]int // pointer -> level
 }
 
 func NewMLFQScheduler() *MLFQScheduler {
@@ -310,7 +311,7 @@ func NewMLFQScheduler() *MLFQScheduler {
 		name:         "MLFQ (Multi-Level Feedback Queue)",
 		timeQuantums: []int{2, 4, 8}, // Increasing time quantums
 		numLevels:    numLevels,
-		levels:       make(map[int]int),
+		levels:       make(map[*process.Process]int),
 	}
 }
 
@@ -323,7 +324,7 @@ func (s *MLFQScheduler) Schedule(readyQueue []*process.Process, currentTime int)
 	var best *process.Process
 	bestLevel := s.numLevels
 	for _, p := range readyQueue {
-		lvl := s.levels[p.PID]
+		lvl := s.levels[p]
 		if lvl < bestLevel ||
 			(lvl == bestLevel && best != nil &&
 				(p.ArrivalTime < best.ArrivalTime ||
@@ -340,22 +341,22 @@ func (s *MLFQScheduler) Schedule(readyQueue []*process.Process, currentTime int)
 
 func (s *MLFQScheduler) AddProcess(p *process.Process) {
 	// New processes start at the highest priority level (0).
-	if _, ok := s.levels[p.PID]; !ok {
-		s.levels[p.PID] = 0
+	if _, ok := s.levels[p]; !ok {
+		s.levels[p] = 0
 	}
 }
 
 func (s *MLFQScheduler) RemoveProcess(p *process.Process) {
-	delete(s.levels, p.PID)
+	delete(s.levels, p)
 }
 
 func (s *MLFQScheduler) Preempt(current *process.Process, readyQueue []*process.Process, currentTime int) bool {
 	if current == nil {
 		return false
 	}
-	currentLevel := s.levels[current.PID]
+	currentLevel := s.levels[current]
 	for _, p := range readyQueue {
-		if p.PID != current.PID && s.levels[p.PID] < currentLevel {
+		if p != current && s.levels[p] < currentLevel {
 			return true
 		}
 	}
@@ -368,7 +369,7 @@ func (s *MLFQScheduler) QuantumFor(p *process.Process) int {
 	if p == nil {
 		return s.timeQuantums[0]
 	}
-	lvl := s.levels[p.PID]
+	lvl := s.levels[p]
 	if lvl < 0 || lvl >= s.numLevels {
 		lvl = s.numLevels - 1
 	}
@@ -380,14 +381,14 @@ func (s *MLFQScheduler) OnQuantumExpired(p *process.Process) {
 	if p == nil {
 		return
 	}
-	lvl := s.levels[p.PID]
+	lvl := s.levels[p]
 	if lvl < s.numLevels-1 {
-		s.levels[p.PID] = lvl + 1
+		s.levels[p] = lvl + 1
 	}
 }
 
 func (s *MLFQScheduler) Reset() {
-	s.levels = make(map[int]int)
+	s.levels = make(map[*process.Process]int)
 }
 
 // LotteryScheduler implements proportional-share (lottery) scheduling.
@@ -411,6 +412,7 @@ type RNG interface {
 // to avoid global state; callers may inject their own RNG.
 type deterministicRNG struct {
 	state uint64
+	seed  uint64 // original seed for Reset()
 }
 
 // NewRNG returns a deterministic RNG seeded with the given value.
@@ -418,7 +420,7 @@ func NewRNG(seed uint64) RNG {
 	if seed == 0 {
 		seed = 0x9E3779B97F4A7C15
 	}
-	return &deterministicRNG{state: seed}
+	return &deterministicRNG{state: seed, seed: seed}
 }
 
 func (r *deterministicRNG) Intn(n int) int {
@@ -486,7 +488,7 @@ func (s *LotteryScheduler) QuantumFor(p *process.Process) int   { return s.quant
 func (s *LotteryScheduler) OnQuantumExpired(p *process.Process) {}
 func (s *LotteryScheduler) Reset() {
 	if r, ok := s.rng.(*deterministicRNG); ok {
-		r.state = 0xC0FFEE
+		r.state = r.seed
 	}
 }
 
@@ -498,7 +500,7 @@ type MLQScheduler struct {
 	name      string
 	numLevels int
 	quantum   int
-	levels    map[int]int // PID -> level
+	levels    map[*process.Process]int // pointer -> level (avoids PID aliasing)
 }
 
 // NewMLQScheduler creates an MLQ scheduler with numLevels queues. If a
@@ -514,7 +516,7 @@ func NewMLQScheduler(numLevels, quantum int) *MLQScheduler {
 		name:      fmt.Sprintf("MLQ (Multi-Level Queue, %d levels)", numLevels),
 		numLevels: numLevels,
 		quantum:   quantum,
-		levels:    make(map[int]int),
+		levels:    make(map[*process.Process]int),
 	}
 }
 
@@ -541,20 +543,20 @@ func (s *MLQScheduler) Schedule(readyQueue []*process.Process, currentTime int) 
 }
 
 func (s *MLQScheduler) AddProcess(p *process.Process) {
-	s.levels[p.PID] = s.levelFor(p)
+	s.levels[p] = s.levelFor(p)
 }
 
 func (s *MLQScheduler) RemoveProcess(p *process.Process) {
-	delete(s.levels, p.PID)
+	delete(s.levels, p)
 }
 
 func (s *MLQScheduler) Preempt(current *process.Process, readyQueue []*process.Process, currentTime int) bool {
 	if current == nil {
 		return false
 	}
-	currentLevel := s.levels[current.PID]
+	currentLevel := s.levels[current]
 	for _, p := range readyQueue {
-		if p.PID != current.PID && s.levels[p.PID] < currentLevel {
+		if p != current && s.levels[p] < currentLevel {
 			return true
 		}
 	}
@@ -569,7 +571,7 @@ func (s *MLQScheduler) QuantumFor(p *process.Process) int { return s.quantum }
 func (s *MLQScheduler) OnQuantumExpired(p *process.Process) {}
 
 func (s *MLQScheduler) Reset() {
-	s.levels = make(map[int]int)
+	s.levels = make(map[*process.Process]int)
 }
 
 // levelFor maps a process's Priority onto a queue level, clamped.

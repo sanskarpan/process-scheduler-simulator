@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+// VRuntimeScale is the fixed-point scaling factor for CFS virtual-runtime
+// arithmetic. Using 1<<20 instead of 1024 ensures that even processes with
+// weight > 1024 (nice < 0) produce a non-zero VRuntime advance per tick.
+// The scheduler uses the same constant for the preemption threshold.
+const VRuntimeScale = 1 << 20
+
 // ProcessState represents the current state of a process
 type ProcessState int
 
@@ -131,7 +137,7 @@ func (p *Process) Execute(currentTime, duration int) {
 	// Update virtual runtime for CFS. All access to VRuntime is serialized by
 	// the simulator's mutex, so a plain int64 is correct and avoids the prior
 	// mixed atomic/non-atomic access data race.
-	p.VRuntime += int64(duration * 1024 / p.Weight)
+	p.VRuntime += int64(duration) * VRuntimeScale / int64(p.Weight)
 
 	if p.RemainingTime <= 0 {
 		p.State = StateTerminated

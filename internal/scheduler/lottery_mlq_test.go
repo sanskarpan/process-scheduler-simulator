@@ -141,3 +141,82 @@ func TestMLQReset(t *testing.T) {
 		t.Errorf("after Reset + AddProcess, Schedule = P%d, want P1", pick.PID)
 	}
 }
+
+// --- ISSUE-036: LotteryScheduler.Reset must restore original seed ---
+
+func TestLotteryResetRestoresSeed(t *testing.T) {
+	seed := uint64(42)
+	s := NewLotteryScheduler(1, NewRNG(seed))
+	p1 := process.NewProcess(1, "P1", 0, 1, 0)
+	p2 := process.NewProcess(2, "P2", 0, 1, 0)
+	ready := []*process.Process{p1, p2}
+
+	first := make([]int, 20)
+	for i := range first {
+		first[i] = s.Schedule(ready, 0).PID
+	}
+
+	s.Reset()
+
+	for i := range first {
+		got := s.Schedule(ready, 0).PID
+		if got != first[i] {
+			t.Errorf("pick[%d] after Reset: got PID=%d, want PID=%d (seed not restored correctly)", i, got, first[i])
+		}
+	}
+}
+
+// --- ISSUE-033: MLFQ levels keyed by pointer not PID ---
+
+func TestMLFQDuplicatePIDNoLevelCorruption(t *testing.T) {
+	s := NewMLFQScheduler()
+	p1 := process.NewProcess(1, "P1", 0, 10, 0)
+	p2 := process.NewProcess(1, "P2", 0, 10, 0) // same PID as p1
+
+	s.AddProcess(p1)
+	s.AddProcess(p2)
+
+	// Demote p2 to level 1
+	s.OnQuantumExpired(p2)
+	levelBeforeRemove := s.QuantumFor(p2)
+
+	// p1 completes — must not delete p2's level entry
+	s.RemoveProcess(p1)
+
+	levelAfterRemove := s.QuantumFor(p2)
+	if levelAfterRemove != levelBeforeRemove {
+		t.Errorf("p2 quantum changed from %d to %d after p1 (same PID) was removed: demotion lost",
+			levelBeforeRemove, levelAfterRemove)
+	}
+	if levelAfterRemove == s.timeQuantums[0] {
+		t.Errorf("p2 quantum = %d (level-0 quantum); p2's demotion was not preserved",
+			levelAfterRemove)
+	}
+}
+
+// --- ISSUE-034: CFS Preempt must check == 0 not <= 1 ---
+
+func TestCFSPreemptSingleCompetitor(t *testing.T) {
+	s := NewCFSScheduler()
+	p1 := process.NewProcess(1, "P1", 0, 10, 0)
+	// p1 has run 10 ticks; VRuntime = 10 * VRuntimeScale / Weight(1024)
+	p1.VRuntime = int64(10) * process.VRuntimeScale / 1024
+	p2 := process.NewProcess(2, "P2", 0, 10, 0)
+	p2.VRuntime = 0 // p2 hasn't run at all
+
+	// p1 should be preempted: minVruntime(0) < p1.VRuntime(10240) - threshold(1024) = 9216
+	if !s.Preempt(p1, []*process.Process{p2}, 10) {
+		t.Errorf("CFS Preempt returned false with one competitor (p1.VRuntime=%d vs p2.VRuntime=0); expected true",
+			p1.VRuntime)
+	}
+}
+
+func TestCFSPreemptNoCompetitor(t *testing.T) {
+	s := NewCFSScheduler()
+	p1 := process.NewProcess(1, "P1", 0, 10, 0)
+	p1.VRuntime = 1000
+
+	if s.Preempt(p1, []*process.Process{}, 10) {
+		t.Error("CFS Preempt returned true with no competitors; expected false")
+	}
+}

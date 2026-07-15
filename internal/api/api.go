@@ -5,8 +5,10 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/sanskar/scheduler-simulator/internal/logging"
@@ -17,6 +19,8 @@ import (
 	"github.com/sanskar/scheduler-simulator/internal/store"
 	"github.com/sanskar/scheduler-simulator/internal/version"
 )
+
+var idCounter atomic.Uint64
 
 // Handler holds dependencies for the REST API handlers.
 type Handler struct {
@@ -243,7 +247,8 @@ func validateProcess(p store.ProcessInput) error {
 }
 
 func generateID(algorithm string, t time.Time) string {
-	return algorithm + "-" + t.Format("20060102-150405.000")
+	n := idCounter.Add(1)
+	return fmt.Sprintf("%s-%s-%d", algorithm, t.Format("20060102-150405.000"), n)
 }
 
 // decodeJSON decodes the request body into dst with a size limit.

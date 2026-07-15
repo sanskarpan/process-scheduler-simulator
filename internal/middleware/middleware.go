@@ -97,10 +97,10 @@ func Recovery(next http.Handler) http.Handler {
 	})
 }
 
-// CORS applies permissive CORS headers for development. In production, restrict
-// allowedOrigins. It handles preflight OPTIONS requests.
+// CORS applies CORS headers for recognized origins. Requests from origins not
+// in allowedOrigins receive no ACAO header so browsers block them. It handles
+// preflight OPTIONS requests.
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
-	allow := strings.Join(allowedOrigins, ", ")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
@@ -111,9 +111,8 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID")
 				w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 				w.Header().Set("Access-Control-Max-Age", "300")
-			} else if allow != "" {
-				w.Header().Set("Access-Control-Allow-Origin", allow)
 			}
+			// No else: unrecognised or absent origins get no ACAO header.
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
