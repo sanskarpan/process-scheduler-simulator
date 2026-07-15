@@ -34,7 +34,7 @@ type Simulator struct {
 	speed           int // Milliseconds per time unit
 	mu              sync.RWMutex
 	wg              sync.WaitGroup // tracks the run() goroutine
-	stepMu          sync.Mutex    // serializes concurrent Step() calls
+	stepMu          sync.Mutex     // serializes concurrent Step() calls
 	pauseChan       chan bool
 	stopChan        chan bool
 	updateCallback  func(*SimulationUpdate)
