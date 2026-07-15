@@ -287,3 +287,254 @@ FINAL_REPORT.md. Severity: Critical / High / Medium / Low.
   engine.
 - **Validation:** Both removed. The engine now drives demotion via the
   `OnQuantumExpired` interface method.
+
+---
+
+## ISSUE-026 — Critical — Three concurrent writers per WebSocket connection with no mutex
+- **Affected components:** `web/server.go`
+- **Description:** gorilla/websocket requires that at most one goroutine writes
+  to a connection at a time. Three goroutines write to every `*websocket.Conn`
+  concurrently: (1) `handleBroadcasts` via `WriteJSON`, (2) the pinger goroutine
+  via `WriteMessage(PingMessage)`, and (3) the reader-loop goroutine via
+  `sendSuccess`/`sendError`/`handleGetState`/`handleInit`. There is no per-
+  connection mutex. The comment at line 83 references a `clientConn` type with a
+  per-connection mutex that does not exist in the codebase.
+- **Root cause:** Structural: the three goroutines were added incrementally
+  without adding the required serialization.
+- **Impact:** Concurrent writes corrupt the WebSocket frame stream → client
+  receives garbled JSON or a protocol error and disconnects. Race detector
+  reports data races under load.
+- **Reproduction:** Start a simulation with high update rate; connect two browser
+  tabs. The `go test -race` run will report concurrent map/slice writes through
+  gorilla's internal write buffer under load.
+- **Fix:** Wrap each `*websocket.Conn` in a `wsConn` struct that holds a
+  `sync.Mutex`. All write calls go through mutex-guarded methods.
+
+---
+
+## ISSUE-027 — Critical — `Reset()` drains `stopChan` before the goroutine exits
+- **Affected components:** `internal/simulator/simulator.go`
+- **Description:** `Stop()` sends `true` to `stopChan` (non-blocking). `Reset()`
+  calls `Stop()` then drains `stopChan` in a `select/default`. If the run
+  goroutine has not yet read from `stopChan` when `Reset()` drains it, the
+  goroutine never receives the stop signal and keeps running. The next `Start()`
+  spawns a second goroutine that races with the first: two goroutines call
+  `executeTimeUnit()` per tick, advancing the clock 2 units instead of 1.
+- **Root cause:** `Stop()` does not wait for the goroutine to exit before
+  returning; `Reset()` incorrectly assumes it does.
+- **Impact:** Goroutine leak; double time-unit advancement after Reset+Start;
+  data races on shared state.
+- **Reproduction:** Call `Start(); time.Sleep(...); Reset(); Start()` in a tight
+  loop with `-race`. Detectable by observing `currentTime` advancing faster than
+  one unit per tick interval.
+- **Fix:** Add a `sync.WaitGroup` to `Simulator`. `run()` calls `wg.Done()` on
+  exit. `Stop()` calls `wg.Wait()` after signaling, guaranteeing the goroutine
+  is gone before returning.
+
+---
+
+## ISSUE-028 — High — CFS `VRuntime` integer truncation for Weight > 1024
+- **Affected components:** `internal/process/process.go:134`
+- **Description:** `p.VRuntime += int64(duration * 1024 / p.Weight)` performs
+  integer arithmetic before the cast. For `duration=1` and any `Weight > 1024`
+  (e.g. nice=-1 → Weight=1280), `1*1024/1280 = 0` in integer arithmetic, so the
+  cast yields 0. VRuntime never advances for negatively-niced processes; CFS
+  always picks them, starving normal-priority processes.
+- **Root cause:** Missing cast before the multiplication: the expression should
+  be `int64(duration)*1024/int64(p.Weight)`.
+- **Impact:** Processes with nice < 0 (weight > 1024) monopolize the CPU under
+  CFS. The corresponding preemption threshold in `CFSScheduler.Preempt` has the
+  same bug.
+- **Reproduction:** `SetNice(-1)` on a process and run under CFS; observe it
+  runs every tick while normal-priority processes starve.
+- **Fix:** `p.VRuntime += int64(duration) * 1024 / int64(p.Weight)`. Same fix
+  needed in the preempt threshold expression.
+
+---
+
+## ISSUE-029 — High — Dynamically-added process with past `ArrivalTime` never scheduled
+- **Affected components:** `internal/simulator/simulator.go:368`
+- **Description:** `checkArrivals()` uses strict equality `p.ArrivalTime ==
+  s.currentTime`. A process added via the WebSocket `addProcess` message with
+  `ArrivalTime < currentTime` (e.g. `ArrivalTime=0` when `currentTime=5`) never
+  passes this check and is never enqueued. The simulation idles indefinitely
+  waiting for processes that will never arrive.
+- **Root cause:** The arrival check was designed for static process sets loaded
+  at time 0; it does not handle the dynamic-add case.
+- **Impact:** Simulation hangs; the dynamically-added process never runs.
+- **Reproduction:** Initialize with no processes, start simulation, then send
+  `addProcess` with `arrivalTime=0`. Observe `currentTime` incrementing with
+  idle CPU forever.
+- **Fix:** Change `p.ArrivalTime == s.currentTime` to `p.ArrivalTime <=
+  s.currentTime` so a process added mid-simulation with a past arrival time
+  enters the ready queue on the next tick.
+
+---
+
+## ISSUE-030 — High — `handleBroadcasts` goroutine leaks on `Shutdown()`
+- **Affected components:** `web/server.go:84`
+- **Description:** `handleBroadcasts()` blocks on `for update := range
+  s.broadcast`. `Shutdown()` closes `s.closed` and closes client connections but
+  never closes `s.broadcast`. The goroutine blocks forever on the receive from
+  the open channel.
+- **Root cause:** Missing `close(s.broadcast)` in `Shutdown()`.
+- **Impact:** One goroutine leaks per server instance; in tests that create many
+  servers the leak is a correctness issue and can mask shutdown races.
+- **Reproduction:** Create a Server, call Shutdown(), then check for leaked
+  goroutines (e.g. `runtime.Stack`).
+- **Fix:** Add `close(s.broadcast)` in `Shutdown()`. Guard all send sites with a
+  `case <-s.closed` arm to avoid panicking on send-to-closed-channel.
+
+---
+
+## ISSUE-031 — High — CORS middleware sets `Access-Control-Allow-Origin` to a comma-joined list
+- **Affected components:** `internal/middleware/middleware.go:114-115`
+- **Description:** `allow := strings.Join(allowedOrigins, ", ")` is set as
+  `Access-Control-Allow-Origin` in the `else if allow != ""` branch (i.e. when
+  the request has no Origin header, or the origin is not in the allowlist). The
+  CORS spec requires ACAO to be either `*` or a single origin; a comma-separated
+  list is invalid. Browsers reject it. Additionally, this branch leaks the full
+  allowlist to requests from unrecognised origins.
+- **Root cause:** Attempt to handle "no origin" case by echoing the config,
+  which misunderstands the ACAO semantics.
+- **Impact:** CORS never works for unrecognised-origin requests (by design) but
+  the header is still set, leaking the allowlist. For same-origin requests the
+  branch is not taken, so those work correctly.
+- **Fix:** Remove the `else if` branch entirely. Only set ACAO when the request
+  origin is in the allowlist.
+
+---
+
+## ISSUE-032 — Medium — `scheduleNextProcess` removes from readyQueue by PID, not pointer
+- **Affected components:** `internal/simulator/simulator.go:392-395`
+- **Description:** After `scheduler.Schedule()` returns the chosen `*Process`,
+  the code removes it from `readyQueue` by searching for the first entry with a
+  matching PID (`p.PID == next.PID`). When two processes share the same PID, the
+  wrong process may be dequeued — either a different process is removed while the
+  selected one stays, or the same process is removed twice.
+- **Root cause:** PID is used as a unique key when it is only required to be an
+  identifier; duplicates are not prevented.
+- **Impact:** One process is silently lost from the ready queue; simulation may
+  deadlock or complete with wrong results.
+- **Fix:** Change the removal loop to compare by pointer: `if p == next`.
+
+---
+
+## ISSUE-033 — Medium — MLFQ/MLQ level map keyed by PID causes corruption with duplicate PIDs
+- **Affected components:** `internal/scheduler/scheduler.go:341-349`
+- **Description:** `MLFQScheduler.levels` and `MLQScheduler.levels` are
+  `map[int]int` keyed by PID. When two processes have the same PID, the second
+  process's level entry aliases the first's. `RemoveProcess(p1)` deletes
+  `levels[pid]`, which also removes p2's level — the next `QuantumFor(p2)` and
+  `Preempt(p2)` calls see level 0 instead of p2's earned demotion, corrupting
+  the scheduling order.
+- **Root cause:** PID used as a unique key for scheduler-internal state.
+- **Impact:** MLFQ demotion history is silently reset for processes sharing a
+  PID after any co-PID process completes. Starvation prevention breaks.
+- **Fix:** Key the map by `*process.Process` pointer instead of PID.
+
+---
+
+## ISSUE-034 — Medium — CFS `Preempt` off-by-one: `len(readyQueue) <= 1` skips single-competitor case
+- **Affected components:** `internal/scheduler/scheduler.go:276`
+- **Description:** `CFSScheduler.Preempt` returns `false` immediately when
+  `len(readyQueue) <= 1`. When exactly one competing process is in the queue
+  (the most common steady-state for two-process workloads), preemption is never
+  checked. The correct guard is `len(readyQueue) == 0` (no competitors at all).
+- **Root cause:** Off-by-one: the current process has already been removed from
+  the ready queue before `Preempt` is called, so `len(readyQueue) == 1` means
+  one competitor exists.
+- **Impact:** Under CFS with two processes, whichever process runs first is
+  never preempted in favour of the other even when its VRuntime far exceeds the
+  minimum granularity. Fairness is severely degraded.
+- **Fix:** Change `<= 1` to `== 0`.
+
+---
+
+## ISSUE-035 — Medium — `Step()` concurrent callers both execute a time unit
+- **Affected components:** `internal/simulator/simulator.go:142`
+- **Description:** `Step()` reads the state under the mutex, releases the lock,
+  then calls `executeTimeUnit()`. Two goroutines that both read `state ==
+  SimStatePaused` will both release the lock and both call `executeTimeUnit()`,
+  advancing `currentTime` by 2 instead of 1. The check-and-execute is not
+  atomic.
+- **Root cause:** The lock is released between the state check and the execution.
+- **Impact:** `currentTime` can advance by N for N concurrent Step() calls.
+  Metrics and Gantt chart entries are doubled.
+- **Fix:** Add a `stepMu sync.Mutex` to `Simulator` and lock it for the full
+  duration of `Step()`.
+
+---
+
+## ISSUE-036 — Medium — `LotteryScheduler.Reset()` hardcodes seed `0xC0FFEE` instead of original seed
+- **Affected components:** `internal/scheduler/scheduler.go:487-491`
+- **Description:** `LotteryScheduler.Reset()` resets the RNG state to the
+  hardcoded constant `0xC0FFEE`, not the seed originally passed to `NewRNG()`.
+  If the scheduler was constructed with a different seed (e.g. for
+  reproducibility testing), `Reset()` produces a different sequence than the
+  original run, breaking replay determinism.
+- **Root cause:** The original seed is not stored in `deterministicRNG`.
+- **Impact:** Lottery simulation replays do not reproduce the same scheduling
+  sequence after Reset.
+- **Fix:** Store the original seed in `deterministicRNG.seed` and restore it in
+  `Reset()`.
+
+---
+
+## ISSUE-037 — Medium — `sendUpdate()` reads `updateCallback` without a lock
+- **Affected components:** `internal/simulator/simulator.go:514`
+- **Description:** `sendUpdate()` reads `s.updateCallback` without holding any
+  lock. `SetUpdateCallback()` writes it under `s.mu.Lock()`. This is a data
+  race: the writer and reader can execute concurrently.
+- **Root cause:** Missing read lock in `sendUpdate()`.
+- **Impact:** Race detector reports a data race; on weakly-ordered CPUs the read
+  could observe a nil or partially-written pointer.
+- **Fix:** Read `s.updateCallback` under `s.mu.RLock()` into a local variable,
+  release the lock, then call the local copy.
+
+---
+
+## ISSUE-038 — Medium — `run()` reads `s.speed` without a lock on first ticker creation
+- **Affected components:** `internal/simulator/simulator.go:249`
+- **Description:** The first line of `run()` is `ticker :=
+  time.NewTicker(time.Duration(s.speed) * time.Millisecond)`, which reads
+  `s.speed` without holding any lock. `SetSpeed()` writes `s.speed` under
+  `s.mu.Lock()`. The resumed path later in `run()` correctly reads `s.speed`
+  under `s.mu.RLock()`.
+- **Root cause:** Oversight: the initial ticker creation did not follow the same
+  pattern as the resume path.
+- **Impact:** Data race reported by the race detector; in theory a partially
+  updated speed value could produce a wildly wrong initial tick interval.
+- **Fix:** Read `s.speed` under `s.mu.RLock()` before creating the initial
+  ticker.
+
+---
+
+## ISSUE-039 — Low — WebSocket `handleInit` silently falls back to FCFS for unknown algorithms
+- **Affected components:** `web/server.go:331`
+- **Description:** The algorithm switch in `handleInit` has `default: sched =
+  scheduler.NewFCFSScheduler()`. An unknown algorithm name (e.g. `"edf"`,
+  `"fcfs "` with a trailing space) silently substitutes FCFS with no error sent
+  to the client. The REST API path correctly returns HTTP 400 for unknown
+  algorithms.
+- **Root cause:** Inconsistent error handling between the WebSocket and REST
+  paths.
+- **Impact:** Client thinks it requested algorithm X but gets FCFS; simulation
+  results are silently wrong.
+- **Fix:** In the `default` case, call `s.sendError(conn, ...)` with a list of
+  valid algorithm names and return.
+
+---
+
+## ISSUE-040 — Low — `generateID` uses millisecond-precision timestamp; concurrent same-ms calls collide
+- **Affected components:** `internal/api/api.go:245`
+- **Description:** `generateID(algorithm, t)` returns
+  `algorithm + "-" + t.Format("20060102-150405.000")`. Millisecond precision
+  means two simulations started for the same algorithm within 1ms receive the
+  same ID. The second result is unreachable via the GET endpoint (map/cache
+  lookup by ID returns the first).
+- **Root cause:** Time alone is insufficient for uniqueness under concurrency.
+- **Impact:** Low probability in production; higher in benchmarks or burst
+  tests. Result of the second simulation is silently discarded.
+- **Fix:** Append an atomic counter suffix: `fmt.Sprintf("%s-%s-%d", algorithm,
+  t.Format(...), idCounter.Add(1))`.

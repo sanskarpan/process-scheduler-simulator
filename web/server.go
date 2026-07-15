@@ -19,13 +19,41 @@ import (
 	"github.com/sanskar/scheduler-simulator/internal/simulator"
 )
 
+// wsConn wraps a WebSocket connection with a per-connection write mutex.
+// gorilla/websocket requires that at most one goroutine writes at a time;
+// the mutex serializes the broadcast goroutine, the pinger, and any
+// in-handler response writes.
+type wsConn struct {
+	conn      *websocket.Conn
+	mu        sync.Mutex
+	writeWait time.Duration
+}
+
+func newWSConn(conn *websocket.Conn, writeWait time.Duration) *wsConn {
+	return &wsConn{conn: conn, writeWait: writeWait}
+}
+
+func (c *wsConn) writeJSON(v interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+	return c.conn.WriteJSON(v)
+}
+
+func (c *wsConn) writeMessage(msgType int, data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+	return c.conn.WriteMessage(msgType, data)
+}
+
 // Server manages WebSocket connections and the simulator. It is safe for
 // concurrent use by many WebSocket handlers.
 type Server struct {
 	cfg       config.Config
 	mu        sync.RWMutex
 	simulator *simulator.Simulator
-	clients   map[*websocket.Conn]struct{}
+	clients   map[*wsConn]struct{}
 	broadcast chan *simulator.SimulationUpdate
 	server    *http.Server
 	closed    chan struct{}
@@ -36,7 +64,7 @@ type Server struct {
 func NewServer(cfg config.Config) *Server {
 	s := &Server{
 		cfg:       cfg,
-		clients:   make(map[*websocket.Conn]struct{}),
+		clients:   make(map[*wsConn]struct{}),
 		broadcast: make(chan *simulator.SimulationUpdate, cfg.BroadcastBufferSize),
 		closed:    make(chan struct{}),
 	}
@@ -77,36 +105,33 @@ func (s *Server) upgrader() *websocket.Upgrader {
 	}
 }
 
-// handleBroadcasts sends updates to all connected clients. It is the single
-// writer goroutine for client sockets' broadcast path; per-client writes also
-// happen in HandleWebSocket (initial state / responses), guarded by a
-// per-connection mutex (see clientConn).
+// handleBroadcasts fans updates out to all connected clients. Each write is
+// serialized through the per-connection wsConn mutex.
 func (s *Server) handleBroadcasts() {
 	for update := range s.broadcast {
 		s.mu.RLock()
-		clients := make([]*websocket.Conn, 0, len(s.clients))
+		clients := make([]*wsConn, 0, len(s.clients))
 		for c := range s.clients {
 			clients = append(clients, c)
 		}
 		s.mu.RUnlock()
 
-		for _, c := range clients {
-			_ = c.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-			if err := c.WriteJSON(update); err != nil {
+		for _, wc := range clients {
+			if err := wc.writeJSON(update); err != nil {
 				logging.Logger.Warn("websocket write error", "error", err)
 				metrics.IncWSError("write")
-				s.unregisterClient(c)
+				s.unregisterClient(wc)
 			}
 		}
 	}
 }
 
-func (s *Server) unregisterClient(c *websocket.Conn) {
+func (s *Server) unregisterClient(wc *wsConn) {
 	s.mu.Lock()
-	if _, ok := s.clients[c]; ok {
-		delete(s.clients, c)
+	if _, ok := s.clients[wc]; ok {
+		delete(s.clients, wc)
 		s.mu.Unlock()
-		_ = c.Close()
+		_ = wc.conn.Close()
 		return
 	}
 	s.mu.Unlock()
@@ -120,13 +145,15 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wc := newWSConn(conn, s.cfg.WSWriteWait)
+
 	s.mu.Lock()
 	if s.cfg.MaxClients > 0 && len(s.clients) >= s.cfg.MaxClients {
 		s.mu.Unlock()
 		_ = conn.Close()
 		return
 	}
-	s.clients[conn] = struct{}{}
+	s.clients[wc] = struct{}{}
 	n := len(s.clients)
 	s.mu.Unlock()
 	metrics.IncClient()
@@ -134,11 +161,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Send initial state if a simulator exists.
 	if sim := s.getSimulator(); sim != nil {
-		_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-		_ = conn.WriteJSON(sim.GetCurrentState())
+		_ = wc.writeJSON(sim.GetCurrentState())
 	}
 
-	// Reader loop. Each message is processed in handleMessage.
+	// Reader loop setup — only the reader goroutine reads; writes go via wc.
 	conn.SetReadLimit(s.cfg.WSReadLimit)
 	_ = conn.SetReadDeadline(time.Now().Add(s.cfg.WSPongWait))
 	conn.SetPongHandler(func(string) error {
@@ -155,13 +181,12 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-ticker.C:
 				s.mu.RLock()
-				_, ok := s.clients[conn]
+				_, ok := s.clients[wc]
 				s.mu.RUnlock()
 				if !ok {
 					return
 				}
-				_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				if err := wc.writeMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
 			case <-done:
@@ -175,7 +200,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		close(done)
 		s.mu.Lock()
-		delete(s.clients, conn)
+		delete(s.clients, wc)
 		n := len(s.clients)
 		s.mu.Unlock()
 		metrics.DecClient()
@@ -192,7 +217,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			break
 		}
-		s.handleMessage(conn, msg)
+		s.handleMessage(wc, msg)
 	}
 }
 
@@ -204,36 +229,36 @@ func (s *Server) getSimulator() *simulator.Simulator {
 }
 
 // handleMessage processes messages from clients.
-func (s *Server) handleMessage(conn *websocket.Conn, msg map[string]interface{}) {
+func (s *Server) handleMessage(wc *wsConn, msg map[string]interface{}) {
 	msgType, ok := msg["type"].(string)
 	if !ok {
-		s.sendError(conn, "Invalid message format: missing 'type'")
+		s.sendError(wc, "Invalid message format: missing 'type'")
 		return
 	}
 
 	switch msgType {
 	case "init":
-		s.handleInit(conn, msg)
+		s.handleInit(wc, msg)
 	case "start":
-		s.handleStart(conn)
+		s.handleStart(wc)
 	case "pause":
-		s.handlePause(conn)
+		s.handlePause(wc)
 	case "resume":
-		s.handleResume(conn)
+		s.handleResume(wc)
 	case "stop":
-		s.handleStop(conn)
+		s.handleStop(wc)
 	case "reset":
-		s.handleReset(conn)
+		s.handleReset(wc)
 	case "step":
-		s.handleStep(conn)
+		s.handleStep(wc)
 	case "speed":
-		s.handleSpeed(conn, msg)
+		s.handleSpeed(wc, msg)
 	case "addProcess":
-		s.handleAddProcess(conn, msg)
+		s.handleAddProcess(wc, msg)
 	case "getState":
-		s.handleGetState(conn)
+		s.handleGetState(wc)
 	default:
-		s.sendError(conn, fmt.Sprintf("Unknown message type: %s", msgType))
+		s.sendError(wc, fmt.Sprintf("Unknown message type: %s", msgType))
 	}
 }
 
@@ -298,7 +323,7 @@ func parseProcess(pMap map[string]interface{}) (*process.Process, error) {
 }
 
 // handleInit initializes the simulator with algorithm and processes.
-func (s *Server) handleInit(conn *websocket.Conn, msg map[string]interface{}) {
+func (s *Server) handleInit(wc *wsConn, msg map[string]interface{}) {
 	algorithm, _ := msg["algorithm"].(string)
 	timeQuantum := 4 // Default time quantum
 	if tq, ok := msg["timeQuantum"].(float64); ok {
@@ -329,7 +354,8 @@ func (s *Server) handleInit(conn *websocket.Conn, msg map[string]interface{}) {
 	case "mlq":
 		sched = scheduler.NewMLQScheduler(3, timeQuantum)
 	default:
-		sched = scheduler.NewFCFSScheduler()
+		s.sendError(wc, fmt.Sprintf("unknown algorithm %q; valid values: fcfs, sjf, srtf, rr, priority, priority_np, cfs, mlfq, lottery, mlq", algorithm))
+		return
 	}
 
 	// Stop the prior simulator (if any) before replacing it, so its engine
@@ -344,6 +370,7 @@ func (s *Server) handleInit(conn *websocket.Conn, msg map[string]interface{}) {
 		// rather than stalling the engine. This bounds memory under load.
 		select {
 		case s.broadcast <- update:
+		case <-s.closed:
 		default:
 			logging.Logger.Warn("broadcast queue full; dropping simulation update")
 		}
@@ -354,12 +381,12 @@ func (s *Server) handleInit(conn *websocket.Conn, msg map[string]interface{}) {
 		for _, pData := range processesData {
 			pMap, ok := pData.(map[string]interface{})
 			if !ok {
-				s.sendError(conn, "Invalid process entry: expected object")
+				s.sendError(wc, "Invalid process entry: expected object")
 				return
 			}
 			proc, err := parseProcess(pMap)
 			if err != nil {
-				s.sendError(conn, fmt.Sprintf("Invalid process data: %v", err))
+				s.sendError(wc, fmt.Sprintf("Invalid process data: %v", err))
 				return
 			}
 			newSim.AddProcess(proc)
@@ -370,168 +397,164 @@ func (s *Server) handleInit(conn *websocket.Conn, msg map[string]interface{}) {
 	s.simulator = newSim
 	s.mu.Unlock()
 
-	s.sendSuccess(conn, "Simulator initialized")
-
-	// Send initial state
-	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-	_ = conn.WriteJSON(newSim.GetCurrentState())
+	s.sendSuccess(wc, "Simulator initialized")
+	_ = wc.writeJSON(newSim.GetCurrentState())
 }
 
 // handleStart starts the simulation
-func (s *Server) handleStart(conn *websocket.Conn) {
+func (s *Server) handleStart(wc *wsConn) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 	sim.Start()
-	s.sendSuccess(conn, "Simulation started")
+	s.sendSuccess(wc, "Simulation started")
 }
 
 // handlePause pauses the simulation
-func (s *Server) handlePause(conn *websocket.Conn) {
+func (s *Server) handlePause(wc *wsConn) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 	sim.Pause()
-	s.sendSuccess(conn, "Simulation paused")
+	s.sendSuccess(wc, "Simulation paused")
 }
 
 // handleResume resumes the simulation
-func (s *Server) handleResume(conn *websocket.Conn) {
+func (s *Server) handleResume(wc *wsConn) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 	sim.Resume()
-	s.sendSuccess(conn, "Simulation resumed")
+	s.sendSuccess(wc, "Simulation resumed")
 }
 
 // handleStop stops the simulation
-func (s *Server) handleStop(conn *websocket.Conn) {
+func (s *Server) handleStop(wc *wsConn) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 	sim.Stop()
-	s.sendSuccess(conn, "Simulation stopped")
+	s.sendSuccess(wc, "Simulation stopped")
 }
 
 // handleReset resets the simulation
-func (s *Server) handleReset(conn *websocket.Conn) {
+func (s *Server) handleReset(wc *wsConn) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 	sim.Reset()
-	s.sendSuccess(conn, "Simulation reset")
+	s.sendSuccess(wc, "Simulation reset")
 
 	// Send updated state (non-blocking; broadcast goroutine delivers)
 	state := sim.GetCurrentState()
 	select {
 	case s.broadcast <- state:
+	case <-s.closed:
 	default:
 	}
 }
 
 // handleStep executes one simulation step
-func (s *Server) handleStep(conn *websocket.Conn) {
+func (s *Server) handleStep(wc *wsConn) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 	sim.Step()
-	s.sendSuccess(conn, "Step executed")
+	s.sendSuccess(wc, "Step executed")
 }
 
 // handleSpeed changes simulation speed
-func (s *Server) handleSpeed(conn *websocket.Conn, msg map[string]interface{}) {
+func (s *Server) handleSpeed(wc *wsConn, msg map[string]interface{}) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 
 	speed, ok := msg["speed"].(float64)
 	if !ok {
-		s.sendError(conn, "Invalid speed value")
+		s.sendError(wc, "Invalid speed value")
 		return
 	}
 	if speed < 1 {
-		s.sendError(conn, "speed must be >= 1")
+		s.sendError(wc, "speed must be >= 1")
 		return
 	}
 	sim.SetSpeed(int(speed))
-	s.sendSuccess(conn, fmt.Sprintf("Speed set to %d ms/unit", int(speed)))
+	s.sendSuccess(wc, fmt.Sprintf("Speed set to %d ms/unit", int(speed)))
 }
 
 // handleAddProcess adds a process dynamically
-func (s *Server) handleAddProcess(conn *websocket.Conn, msg map[string]interface{}) {
+func (s *Server) handleAddProcess(wc *wsConn, msg map[string]interface{}) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
 
 	processData, ok := msg["process"].(map[string]interface{})
 	if !ok {
-		s.sendError(conn, "Invalid process data")
+		s.sendError(wc, "Invalid process data")
 		return
 	}
 
 	proc, err := parseProcess(processData)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("Invalid process data: %v", err))
+		s.sendError(wc, fmt.Sprintf("Invalid process data: %v", err))
 		return
 	}
 	sim.AddProcess(proc)
-	s.sendSuccess(conn, fmt.Sprintf("Process %s added", proc.Name))
+	s.sendSuccess(wc, fmt.Sprintf("Process %s added", proc.Name))
 
 	// Send updated state (non-blocking)
 	state := sim.GetCurrentState()
 	select {
 	case s.broadcast <- state:
+	case <-s.closed:
 	default:
 	}
 }
 
 // handleGetState returns current simulation state
-func (s *Server) handleGetState(conn *websocket.Conn) {
+func (s *Server) handleGetState(wc *wsConn) {
 	sim := s.getSimulator()
 	if sim == nil {
-		s.sendError(conn, "Simulator not initialized")
+		s.sendError(wc, "Simulator not initialized")
 		return
 	}
-	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
-	_ = conn.WriteJSON(sim.GetCurrentState())
+	_ = wc.writeJSON(sim.GetCurrentState())
 }
 
 // sendSuccess sends a success message
-func (s *Server) sendSuccess(conn *websocket.Conn, message string) {
-	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+func (s *Server) sendSuccess(wc *wsConn, message string) {
 	response := map[string]interface{}{
 		"type":    "success",
 		"message": message,
 	}
-	if err := conn.WriteJSON(response); err != nil {
+	if err := wc.writeJSON(response); err != nil {
 		logging.Logger.Warn("websocket write error", "error", err)
 	}
 }
 
 // sendError sends an error message
-func (s *Server) sendError(conn *websocket.Conn, message string) {
-	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WSWriteWait))
+func (s *Server) sendError(wc *wsConn, message string) {
 	response := map[string]interface{}{
 		"type":    "error",
 		"message": message,
 	}
-	if err := conn.WriteJSON(response); err != nil {
+	if err := wc.writeJSON(response); err != nil {
 		logging.Logger.Warn("websocket write error", "error", err)
 	}
 }
@@ -566,15 +589,16 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Shutdown() {
 	s.closeOnce.Do(func() {
 		close(s.closed)
+		close(s.broadcast) // unblocks handleBroadcasts goroutine
 
 		if sim := s.getSimulator(); sim != nil {
 			sim.Stop()
 		}
 
 		s.mu.Lock()
-		for c := range s.clients {
-			_ = c.Close()
-			delete(s.clients, c)
+		for wc := range s.clients {
+			_ = wc.conn.Close()
+			delete(s.clients, wc)
 		}
 		s.mu.Unlock()
 
