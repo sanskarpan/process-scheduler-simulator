@@ -33,6 +33,8 @@ type Simulator struct {
 	state           SimulationState
 	speed           int // Milliseconds per time unit
 	mu              sync.RWMutex
+	wg              sync.WaitGroup // tracks the run() goroutine
+	stepMu          sync.Mutex    // serializes concurrent Step() calls
 	pauseChan       chan bool
 	stopChan        chan bool
 	updateCallback  func(*SimulationUpdate)
@@ -107,6 +109,7 @@ func (s *Simulator) Start() {
 		return
 	}
 	s.state = SimStateRunning
+	s.wg.Add(1)
 	s.mu.Unlock()
 
 	go s.run()
@@ -140,6 +143,11 @@ func (s *Simulator) Resume() {
 // when the engine is paused or idle; stepping while running is ignored to
 // avoid racing with the ticker and double-executing time units.
 func (s *Simulator) Step() {
+	// stepMu serializes concurrent Step() callers so two goroutines cannot
+	// both pass the state check and both call executeTimeUnit().
+	s.stepMu.Lock()
+	defer s.stepMu.Unlock()
+
 	s.mu.Lock()
 	if s.state == SimStateRunning || s.state == SimStateComplete {
 		s.mu.Unlock()
@@ -163,17 +171,18 @@ func (s *Simulator) Step() {
 	}
 }
 
-// Stop stops the simulation and ensures the run goroutine exits.
+// Stop stops the simulation and waits for the run goroutine to exit before
+// returning. Subsequent calls are safe (no-ops if already stopped).
 func (s *Simulator) Stop() {
 	s.mu.Lock()
 	if s.state == SimStateRunning || s.state == SimStatePaused {
 		s.state = SimStateIdle
 		s.mu.Unlock()
-		// Non-blocking: the run goroutine listens on stopChan.
 		select {
 		case s.stopChan <- true:
 		default:
 		}
+		s.wg.Wait() // wait until run() calls wg.Done()
 		return
 	}
 	s.mu.Unlock()
@@ -183,17 +192,12 @@ func (s *Simulator) Stop() {
 // is stopped first so the run goroutine exits and does not race with the
 // reset. Processes themselves are restored to their pre-simulation state.
 func (s *Simulator) Reset() {
-	// Stop any running goroutine first.
+	// Stop() guarantees the run goroutine has exited before returning.
 	s.Stop()
 
-	// Drain any pending control signals so a stale stop does not fire against
-	// the fresh state.
+	// Drain the pause signal only; stopChan was already consumed by run().
 	select {
 	case <-s.pauseChan:
-	default:
-	}
-	select {
-	case <-s.stopChan:
 	default:
 	}
 
@@ -246,7 +250,13 @@ func (s *Simulator) SetSpeed(speed int) {
 // synchronously and does not go through this loop. The loop exits on stopChan
 // or when the simulation completes.
 func (s *Simulator) run() {
-	ticker := time.NewTicker(time.Duration(s.speed) * time.Millisecond)
+	defer s.wg.Done()
+
+	s.mu.RLock()
+	speed := s.speed
+	s.mu.RUnlock()
+
+	ticker := time.NewTicker(time.Duration(speed) * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -362,10 +372,12 @@ func (s *Simulator) executeTimeUnit() {
 	}
 }
 
-// checkArrivals checks for processes arriving at current time
+// checkArrivals checks for processes arriving at or before current time.
+// Using <= instead of == handles processes added dynamically with a past
+// arrivalTime (e.g. arrivalTime=0 when currentTime=5).
 func (s *Simulator) checkArrivals() {
 	for _, p := range s.processes {
-		if p.ArrivalTime == s.currentTime && p.State == process.StateNew {
+		if p.ArrivalTime <= s.currentTime && p.State == process.StateNew {
 			p.State = process.StateReady
 			s.readyQueue = append(s.readyQueue, p)
 			s.scheduler.AddProcess(p)
@@ -388,9 +400,10 @@ func (s *Simulator) scheduleNextProcess() {
 		return
 	}
 
-	// Remove from ready queue
+	// Remove from ready queue by pointer, not PID, to correctly handle
+	// processes that share the same PID.
 	for i, p := range s.readyQueue {
-		if p.PID == next.PID {
+		if p == next {
 			s.readyQueue = append(s.readyQueue[:i], s.readyQueue[i+1:]...)
 			break
 		}
@@ -511,8 +524,11 @@ func (s *Simulator) isComplete() bool {
 // leak if the broadcast channel blocked).
 func (s *Simulator) sendUpdate() {
 	update := s.snapshotState()
-	if s.updateCallback != nil {
-		s.updateCallback(update)
+	s.mu.RLock()
+	cb := s.updateCallback
+	s.mu.RUnlock()
+	if cb != nil {
+		cb(update)
 	}
 }
 
