@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,6 +26,31 @@ import (
 var buildVersion = version.Version
 
 func main() {
+	// --health flag: perform a quick liveness probe and exit 0/1.
+	// Used by the Dockerfile HEALTHCHECK so the binary can self-probe
+	// without bundling wget or curl in the distroless image.
+	if len(os.Args) == 2 && os.Args[1] == "--health" {
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = ":8082"
+		}
+		if port[0] != ':' {
+			port = ":" + port
+		}
+		url := fmt.Sprintf("http://localhost%s/health", port)
+		resp, err := (&http.Client{Timeout: 3 * time.Second}).Get(url) //nolint:noctx
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "health check failed:", err)
+			os.Exit(1)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			fmt.Fprintln(os.Stderr, "health check status:", resp.StatusCode)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	cfg, err := config.FromEnv().Validate()
 	if err != nil {
 		slog.Error("invalid configuration", "error", err)
