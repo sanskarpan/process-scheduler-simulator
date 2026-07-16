@@ -84,6 +84,7 @@ func main() {
 	handler := middleware.Chain(
 		mux,
 		middleware.Recovery,
+		middleware.SecureHeaders,
 		middleware.RequestID,
 		middleware.LogAndMetrics,
 		middleware.CORS(cfg.WSOriginAllow),

@@ -58,14 +58,36 @@ func (w *statusWriter) Flush() {
 	}
 }
 
+// SecureHeaders sets defensive HTTP response headers on every response.
+// It must run before any handler that writes a body so the headers are
+// always present even on error responses.
+func SecureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// Narrow CSP: API/WS only serves JSON and static assets; no inline scripts.
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RequestID injects a request ID into the request context and response
 // headers. If the client provides an X-Request-ID, it is reused (after
-// truncation) to support distributed tracing.
+// truncation and sanitization) to support distributed tracing.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
 		if id == "" {
 			id = logging.NextRequestID()
+		} else {
+			// Sanitize: keep only printable ASCII (0x20–0x7E) to prevent
+			// CRLF injection into the reflected response header.
+			id = sanitizeHeaderValue(id)
+			if id == "" {
+				id = logging.NextRequestID()
+			}
 		}
 		if len(id) > 64 {
 			id = id[:64]
@@ -74,6 +96,18 @@ func RequestID(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// sanitizeHeaderValue strips any byte outside printable ASCII (0x20–0x7E).
+func sanitizeHeaderValue(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b >= 0x20 && b <= 0x7E {
+			out = append(out, b)
+		}
+	}
+	return string(out)
 }
 
 // LogAndMetrics logs each request and records Prometheus metrics. It must run
