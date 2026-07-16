@@ -50,7 +50,7 @@ type SimulationUpdate struct {
 	CurrentProcess  *process.Process           `json:"currentProcess"`
 	ReadyQueue      []*process.Process         `json:"readyQueue"`
 	WaitingQueue    []*process.Process         `json:"waitingQueue"`
-	CompletedProces []*process.Process         `json:"completedProcesses"`
+	CompletedProcesses []*process.Process       `json:"completedProcesses"`
 	GanttChart      []process.GanttEntry       `json:"ganttChart"`
 	Events          []process.ProcessEvent     `json:"events"`
 	Metrics         *process.SchedulingMetrics `json:"metrics"`
@@ -661,7 +661,7 @@ func (s *Simulator) snapshotState() *SimulationUpdate {
 		CurrentProcess:  currentClone,
 		ReadyQueue:      readyClone,
 		WaitingQueue:    waitingClone,
-		CompletedProces: completed,
+		CompletedProcesses: completed,
 		GanttChart:      ganttClone,
 		Events:          eventsClone,
 		Metrics:         s.calculateMetrics(),
