@@ -30,3 +30,7 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "chore(ci)"
+    ignore:
+      # Only auto-update patch and minor versions; major bumps need manual review.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
