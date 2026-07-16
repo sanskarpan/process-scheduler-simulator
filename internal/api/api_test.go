@@ -163,3 +163,78 @@ func TestHandleGetNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestHandleSimulateWithIOBursts(t *testing.T) {
+	_, mux := newTestHandler(t)
+	body := map[string]interface{}{
+		"algorithm": "fcfs",
+		"processes": []map[string]interface{}{
+			{
+				"pid":         1,
+				"name":        "P1",
+				"arrivalTime": 0,
+				"burstTime":   6,
+				"priority":    0,
+				"ioBursts": []map[string]interface{}{
+					{"afterCPUTime": 3, "duration": 2},
+				},
+			},
+		},
+	}
+	rec := doJSON(t, mux, http.MethodPost, "/api/simulate", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var resp simulateResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.State == nil {
+		t.Fatal("State is nil")
+	}
+	if resp.State.State != "complete" {
+		t.Errorf("State.State = %q, want complete", resp.State.State)
+	}
+	// 3 CPU ticks → I/O wait 2 ticks → 3 more CPU ticks = 7 elapsed ticks (currentTime=7).
+	if resp.State.CurrentTime < 7 {
+		t.Errorf("CurrentTime = %d, want >= 7 (3 cpu + 2 io + 3 cpu - 1)", resp.State.CurrentTime)
+	}
+	if resp.State.Metrics == nil {
+		t.Fatal("Metrics is nil")
+	}
+	if resp.State.Metrics.CompletedProcesses != 1 {
+		t.Errorf("CompletedProcesses = %d, want 1", resp.State.Metrics.CompletedProcesses)
+	}
+	// Verify I/O event was recorded.
+	foundIO := false
+	for _, e := range resp.State.Events {
+		if e.EventType == "io_start" || e.EventType == "io_complete" {
+			foundIO = true
+			break
+		}
+	}
+	if !foundIO {
+		t.Errorf("expected I/O events in simulation, got none: %+v", resp.State.Events)
+	}
+}
+
+func TestHandleSimulateConcurrencyLimit(t *testing.T) {
+	h := NewHandler(store.New(10), 4, 1, 1) // concurrencyLimit=1
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	// Acquire the semaphore slot by pre-filling it.
+	h.simSem <- struct{}{}
+	defer func() { <-h.simSem }()
+
+	body := map[string]interface{}{
+		"algorithm": "fcfs",
+		"processes": []map[string]interface{}{
+			{"pid": 1, "name": "P1", "arrivalTime": 0, "burstTime": 1, "priority": 0},
+		},
+	}
+	rec := doJSON(t, mux, http.MethodPost, "/api/simulate", body)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 when semaphore is full", rec.Code)
+	}
+}
