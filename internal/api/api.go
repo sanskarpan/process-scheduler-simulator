@@ -252,8 +252,8 @@ func validateProcess(p store.ProcessInput) error {
 	if p.Arrival < 0 {
 		return errors.New("arrivalTime must be >= 0")
 	}
-	if p.Burst < 0 {
-		return errors.New("burstTime must be >= 0")
+	if p.Burst <= 0 {
+		return errors.New("burstTime must be >= 1")
 	}
 	return nil
 }

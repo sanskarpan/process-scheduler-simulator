@@ -321,8 +321,8 @@ func parseProcess(pMap map[string]interface{}) (*process.Process, error) {
 	if arrival < 0 {
 		return nil, errors.New("arrivalTime must be >= 0")
 	}
-	if burst < 0 {
-		return nil, errors.New("burstTime must be >= 0")
+	if burst <= 0 {
+		return nil, errors.New("burstTime must be >= 1")
 	}
 	if pid < 0 {
 		return nil, errors.New("pid must be >= 0")
@@ -408,6 +408,12 @@ func (s *Server) handleInit(wc *wsConn, msg map[string]interface{}) {
 			}
 			parsedProcs = append(parsedProcs, proc)
 		}
+	}
+
+	// Require at least one process before touching the running simulator.
+	if len(parsedProcs) == 0 {
+		s.sendError(wc, "at least one process is required")
+		return
 	}
 
 	// Stop the prior simulator (if any) before replacing it, so its engine

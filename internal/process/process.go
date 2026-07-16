@@ -155,19 +155,6 @@ func (p *Process) IsComplete() bool {
 	return p.State == StateTerminated || p.RemainingTime <= 0
 }
 
-// CalculateMetrics computes all scheduling metrics
-func (p *Process) CalculateMetrics(currentTime int) {
-	if p.IsComplete() {
-		p.TurnaroundTime = p.CompletionTime - p.ArrivalTime
-		p.WaitingTime = p.TurnaroundTime - p.BurstTime
-	} else {
-		// For processes still running/waiting
-		elapsed := currentTime - p.ArrivalTime
-		cpuUsed := p.BurstTime - p.RemainingTime
-		p.WaitingTime = elapsed - cpuUsed
-	}
-}
-
 // SetNice sets the nice value and updates weight (CFS)
 func (p *Process) SetNice(nice int) {
 	if nice < -20 {
