@@ -202,11 +202,14 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 func buildScheduler(algorithm string, timeQuantum int) (scheduler.Scheduler, string, error) {
 	switch algorithm {
 	case "fcfs":
-		return scheduler.NewFCFSScheduler(), scheduler.NewFCFSScheduler().Name(), nil
+		s := scheduler.NewFCFSScheduler()
+		return s, s.Name(), nil
 	case "sjf":
-		return scheduler.NewSJFScheduler(), scheduler.NewSJFScheduler().Name(), nil
+		s := scheduler.NewSJFScheduler()
+		return s, s.Name(), nil
 	case "srtf":
-		return scheduler.NewSRTFScheduler(), scheduler.NewSRTFScheduler().Name(), nil
+		s := scheduler.NewSRTFScheduler()
+		return s, s.Name(), nil
 	case "rr":
 		s := scheduler.NewRoundRobinScheduler(timeQuantum)
 		return s, s.Name(), nil
