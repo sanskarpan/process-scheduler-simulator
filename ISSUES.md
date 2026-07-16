@@ -587,3 +587,46 @@ FINAL_REPORT.md. Severity: Critical / High / Medium / Low.
 - **Description:** `http.MaxBytesReader(nil, r.Body, 1<<20)` passes a nil `http.ResponseWriter`. In Go versions where `maxBytesReader` dereferences `w` to send a 413 status, this causes a nil pointer panic. Even in versions that return the error instead, `nil` is semantically wrong and may panic on future Go upgrades.
 - **Root cause:** `decodeJSON` did not receive the `ResponseWriter` parameter, so `nil` was used as a placeholder.
 - **Fix:** Add `w http.ResponseWriter` parameter to `decodeJSON` and pass the actual writer from `handleSimulate`.
+
+---
+
+## ISSUE-047 — Critical — Data race: `Shutdown()` closes `s.broadcast` while WebSocket handlers still sending to it
+- **Affected components:** `web/server.go` (Shutdown, HandleWebSocket, handleAddProcess, handleReset, handleStep)
+- **Description:** ISSUE-041 fixed the run() goroutine path, but WebSocket handler goroutines (handleAddProcess, handleReset, handleStep, handleSpeed) also send to `s.broadcast` via `select { case s.broadcast <- state: ... }`. The `case <-s.closed:` guard does not prevent the race: Go's select evaluates ALL cases, and concurrent `close(s.broadcast)` + `s.broadcast <- state` (from another goroutine) is a documented data race in Go even inside a select statement.
+- **Root cause:** `Shutdown()` did not wait for all WebSocket handler goroutines to finish before closing the broadcast channel.
+- **Impact:** Race detector flags the issue. Under the Go memory model, concurrent close and send on the same channel is undefined behavior.
+- **Validation:** `go test -race -count=1 ./web/` previously failed with DATA RACE in `TestWS_AddProcess_Valid`; now passes clean.
+- **Fix:** Added `clientWg sync.WaitGroup` to `Server`. `HandleWebSocket` calls `clientWg.Add(1)` / `defer clientWg.Done()`. `Shutdown()` now: closes connections → `clientWg.Wait()` → `close(s.broadcast)`. This guarantees no handler goroutine is mid-select on broadcast when it is closed.
+
+---
+
+## ENHANCEMENT-001 — `buildScheduler` double-instantiation fixed
+- **Affected components:** `internal/api/api.go` (buildScheduler)
+- **Description:** buildScheduler created each scheduler twice (`return NewFCFSScheduler(), NewFCFSScheduler().Name(), nil`), seeding the lottery RNG twice and wasting allocations.
+- **Fix:** Store the scheduler in a local variable; call `.Name()` on the same instance.
+
+---
+
+## ENHANCEMENT-002 — `web` package unit tests (0% → 83.3% coverage)
+- **Affected components:** `web/server_test.go` (new file)
+- **Description:** The web package had no tests. Added 40+ test functions covering: DefaultPort, parseProcess, HandleHealth, all WebSocket message types (init, start, pause, resume, stop, reset, step, speed, addProcess, getState), broadcast delivery, and Shutdown behavior.
+
+---
+
+## ENHANCEMENT-003 — Priority aging / starvation prevention
+- **Affected components:** `internal/scheduler/scheduler.go` (PriorityScheduler)
+- **Description:** PriorityScheduler had no starvation prevention. A low-priority process could wait indefinitely if higher-priority processes kept arriving.
+- **Fix:** Added stateless priority aging: for every `agingInterval` ticks a process spends waiting (derived from `p.LastExecuted` and `p.ArrivalTime` — no per-process map), effective priority is improved by 1 (clamped at 0). Default interval: 10 ticks. `NewPrioritySchedulerWithAging(preemptive, interval)` constructor added for custom intervals. Both `Schedule()` and `Preempt()` use effective priority. Added 13 aging-specific tests.
+
+---
+
+## ENHANCEMENT-004 — `scheduler` package test coverage (36% → 91.3%)
+- **Affected components:** `internal/scheduler/scheduler_test.go` (new file)
+- **Description:** Created 60+ test functions covering FCFS, SJF, SRTF, RoundRobin, Priority (with/without aging), CFS, MLFQ, MLQ, and Lottery schedulers — including all tiebreak paths, edge cases (empty queue, nil current, single process), and boundary conditions.
+
+---
+
+## ENHANCEMENT-005 — I/O burst support (previously dead code)
+- **Affected components:** `internal/simulator/simulator.go`, `internal/process/process.go`, `internal/simulator/simulator_test.go`
+- **Description:** `Process.IOBursts`, `Process.CurrentIOIndex`, and `process.StateWaiting` existed in the data model but `executeTimeUnit()` never checked them. Processes with I/O bursts ran as if they had no I/O.
+- **Fix:** Added `ioQueue []*process.Process` to `Simulator`. Two new helpers: `tickIOQueue()` (runs at start of each tick; decrements IORemaining for each waiting process; moves done processes back to readyQueue) and `checkIOBurst()` (runs after each CPU execution; if a process has consumed enough CPU ticks to trigger its next I/O burst, it is moved to ioQueue with StateWaiting). Added `IORemaining int` to `Process` (with Clone/Reset support). Added `WaitingQueue []*process.Process` to `SimulationUpdate` for client visibility. `Reset()` now also resets IOBurst.Completed flags. Six integration tests added.
