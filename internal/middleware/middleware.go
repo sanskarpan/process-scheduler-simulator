@@ -1,5 +1,6 @@
 // Package middleware provides HTTP middleware: request-ID injection,
-// structured logging, Prometheus metrics, panic recovery, and CORS.
+// structured logging, Prometheus metrics, panic recovery, CORS, secure
+// response headers, and per-IP token-bucket rate limiting.
 package middleware
 
 import (
@@ -9,11 +10,51 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/sanskar/scheduler-simulator/internal/logging"
 	"github.com/sanskar/scheduler-simulator/internal/metrics"
 )
+
+// RateLimiter holds per-IP token buckets.
+type RateLimiter struct {
+	mu      sync.Mutex
+	clients map[string]*rate.Limiter
+	r       rate.Limit // tokens per second
+	b       int        // burst size
+}
+
+// NewRateLimiter returns a middleware that limits each IP to r requests/sec
+// with an allowed burst of b. Suitable for wrapping /api/simulate and /ws.
+func NewRateLimiter(r rate.Limit, b int) *RateLimiter {
+	return &RateLimiter{clients: make(map[string]*rate.Limiter), r: r, b: b}
+}
+
+func (rl *RateLimiter) limiter(ip string) *rate.Limiter {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	if l, ok := rl.clients[ip]; ok {
+		return l
+	}
+	l := rate.NewLimiter(rl.r, rl.b)
+	rl.clients[ip] = l
+	return l
+}
+
+// Handler wraps next and returns 429 when the caller's IP exceeds the rate.
+func (rl *RateLimiter) Handler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if !rl.limiter(ip).Allow() {
+			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // statusWriter wraps http.ResponseWriter to capture the status code and bytes
 // written, for logging and metrics.
