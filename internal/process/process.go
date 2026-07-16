@@ -60,6 +60,7 @@ type Process struct {
 	Weight         int          // Weight for CFS scheduling
 	IOBursts       []IOBurst    // I/O operations
 	CurrentIOIndex int          // Current I/O operation index
+	IORemaining    int          // Ticks remaining in current I/O operation (0 = not in I/O)
 	Color          string       // Color for visualization
 	HasStarted     bool         // Internal flag to track first execution
 }
@@ -113,6 +114,7 @@ func (p *Process) Clone() *Process {
 		Weight:         p.Weight,
 		IOBursts:       ioBursts,
 		CurrentIOIndex: p.CurrentIOIndex,
+		IORemaining:    p.IORemaining,
 		Color:          p.Color,
 		HasStarted:     p.HasStarted,
 	}
