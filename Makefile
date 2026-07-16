@@ -9,7 +9,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS += -X main.buildVersion=$(VERSION)
 
 .PHONY: all build run test test-race test-verbose lint vet fmt tidy \
-        benchmark docker build-all clean ci help
+        benchmark docker build-all clean ci cover vuln help
 
 all: build
 
@@ -34,10 +34,10 @@ test-race:
 test-verbose:
 	go test -race -count=1 -v ./...
 
-## lint: run golangci-lint (install if missing)
+## lint: run golangci-lint (install v2.1.6 if missing; must match CI)
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.62.2
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v2.1.6
 	golangci-lint run ./... --timeout 5m
 
 ## vet: go vet
@@ -69,12 +69,24 @@ build-all:
 	GOOS=darwin  GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/$(PKG)-darwin-amd64  ./cmd/server
 	GOOS=darwin  GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/$(PKG)-darwin-arm64  ./cmd/server
 
+## cover: run tests and open HTML coverage report
+cover:
+	go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@pct=$$(go tool cover -func=coverage.out | awk '/^total/{gsub(/%/,"",$3); print $$3}'); \
+	  echo "Coverage: $${pct}%"
+
+## vuln: check dependencies for known vulnerabilities
+vuln:
+	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
+	govulncheck ./...
+
 ## clean: remove build artifacts
 clean:
-	rm -rf bin/
+	rm -rf bin/ coverage.out coverage.html
 
-## ci: the full pipeline CI runs (build + vet + lint + race tests + benchmarks)
-ci: build vet lint test-race benchmark
+## ci: the full pipeline CI runs (build + vet + lint + race tests + coverage + vuln)
+ci: build vet lint test-race cover vuln benchmark
 	@echo "CI pipeline complete."
 
 ## help: list targets

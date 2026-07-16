@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    name: Build, Vet, Lint, Test (race)
+    name: Build, Vet, Lint, Test (race), Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,22 +37,42 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          version: "v2.1.6"
           args: --timeout 5m
 
       - name: Test (race)
         run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Benchmarks (smoke, no regression check)
-        run: go test -run='^$' -bench=. -benchmem -count=1 ./internal/simulator/...
+      - name: Coverage gate (≥70%)
+        run: |
+          pct=$(go tool cover -func=coverage.out | awk '/^total/{gsub(/%/,"",$3); print $3}')
+          echo "Coverage: ${pct}%"
+          awk -v p="$pct" 'BEGIN{if(p+0 < 70){print "FAIL: coverage " p "% is below 70% threshold"; exit 1}}'
 
-      - name: Upload coverage
+      - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.out
           if-no-files-found: ignore
+
+      - name: Benchmarks (smoke, no regression check)
+        run: go test -run='^$' -bench=. -benchmem -count=1 ./internal/simulator/...
+
+  vuln:
+    name: Vulnerability scan (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
 
   docker:
     name: Docker build
@@ -62,3 +82,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t scheduler-simulator:ci .
+      - name: Validate docker-compose config
+        run: docker compose config --quiet

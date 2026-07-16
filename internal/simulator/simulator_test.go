@@ -566,10 +566,10 @@ func TestIOBurstBasic(t *testing.T) {
 	}
 
 	// Process must have completed its full burst (5 CPU ticks).
-	if len(final.CompletedProces) != 1 {
-		t.Fatalf("completedProcesses = %d, want 1", len(final.CompletedProces))
+	if len(final.CompletedProcesses) != 1 {
+		t.Fatalf("completedProcesses = %d, want 1", len(final.CompletedProcesses))
 	}
-	completed := final.CompletedProces[0]
+	completed := final.CompletedProcesses[0]
 	if completed.RemainingTime != 0 {
 		t.Errorf("RemainingTime = %d after completion, want 0", completed.RemainingTime)
 	}
@@ -615,8 +615,8 @@ func TestIOBurstTwoProcesses(t *testing.T) {
 	sim.AddProcess(p2)
 	final := runToCompletion(t, sim)
 
-	if len(final.CompletedProces) != 2 {
-		t.Fatalf("completedProcesses = %d, want 2", len(final.CompletedProces))
+	if len(final.CompletedProcesses) != 2 {
+		t.Fatalf("completedProcesses = %d, want 2", len(final.CompletedProcesses))
 	}
 
 	// CPU utilization should be high because P2 ran during P1's I/O.
@@ -626,7 +626,7 @@ func TestIOBurstTwoProcesses(t *testing.T) {
 
 	// P2 must be completed (not blocked).
 	p2Done := false
-	for _, cp := range final.CompletedProces {
+	for _, cp := range final.CompletedProcesses {
 		if cp.PID == 2 {
 			p2Done = true
 		}
@@ -648,8 +648,8 @@ func TestIOBurstMultiple(t *testing.T) {
 	sim.AddProcess(p1)
 	final := runToCompletion(t, sim)
 
-	if len(final.CompletedProces) != 1 {
-		t.Fatalf("completedProcesses = %d, want 1", len(final.CompletedProces))
+	if len(final.CompletedProcesses) != 1 {
+		t.Fatalf("completedProcesses = %d, want 1", len(final.CompletedProcesses))
 	}
 
 	ioStartCount := 0
@@ -678,13 +678,13 @@ func TestIOBurstReset(t *testing.T) {
 	sim.AddProcess(newP())
 
 	first := runToCompletion(t, sim)
-	firstTT := first.CompletedProces[0].TurnaroundTime
+	firstTT := first.CompletedProcesses[0].TurnaroundTime
 
 	sim.Reset()
 	sim.SetUpdateCallback(nil)
 
 	second := runToCompletion(t, sim)
-	secondTT := second.CompletedProces[0].TurnaroundTime
+	secondTT := second.CompletedProcesses[0].TurnaroundTime
 
 	if firstTT != secondTT {
 		t.Errorf("turnaround after Reset: first=%d second=%d (should be deterministic)", firstTT, secondTT)
@@ -731,7 +731,7 @@ func TestIOBurstNoBursts(t *testing.T) {
 	sim.AddProcess(p1)
 	final := runToCompletion(t, sim)
 
-	if len(final.CompletedProces) != 1 {
-		t.Fatalf("completedProcesses = %d, want 1 (no IOBursts should not affect completion)", len(final.CompletedProces))
+	if len(final.CompletedProcesses) != 1 {
+		t.Fatalf("completedProcesses = %d, want 1 (no IOBursts should not affect completion)", len(final.CompletedProcesses))
 	}
 }

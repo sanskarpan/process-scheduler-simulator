@@ -1,3 +1,7 @@
+// Package scheduler defines the Scheduler interface and provides ten
+// implementations: FCFS, SJF, SRTF, Round Robin, Priority (preemptive and
+// non-preemptive), CFS, MLFQ, Lottery, and MLQ. All implementations are
+// safe for use from a single goroutine (the simulator's run loop).
 package scheduler
 
 import (

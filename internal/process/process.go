@@ -1,3 +1,6 @@
+// Package process defines the Process type, I/O burst records, Gantt chart
+// entries, event log entries, and aggregate scheduling metrics used throughout
+// the simulator.
 package process
 
 import (
@@ -153,19 +156,6 @@ func (p *Process) Execute(currentTime, duration int) {
 // IsComplete checks if process has finished execution
 func (p *Process) IsComplete() bool {
 	return p.State == StateTerminated || p.RemainingTime <= 0
-}
-
-// CalculateMetrics computes all scheduling metrics
-func (p *Process) CalculateMetrics(currentTime int) {
-	if p.IsComplete() {
-		p.TurnaroundTime = p.CompletionTime - p.ArrivalTime
-		p.WaitingTime = p.TurnaroundTime - p.BurstTime
-	} else {
-		// For processes still running/waiting
-		elapsed := currentTime - p.ArrivalTime
-		cpuUsed := p.BurstTime - p.RemainingTime
-		p.WaitingTime = elapsed - cpuUsed
-	}
 }
 
 // SetNice sets the nice value and updates weight (CFS)

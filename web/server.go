@@ -1,3 +1,6 @@
+// Package web implements the WebSocket simulation server. A single Server
+// instance manages one active Simulator, broadcasts state updates to all
+// connected clients, and translates JSON messages into simulator commands.
 package web
 
 import (
@@ -82,6 +85,7 @@ func NewServer(cfg config.Config) *Server {
 // pointer receiver.
 func (s *Server) upgrader() *websocket.Upgrader {
 	allowed := s.cfg.WSOriginAllow
+	allowLocal := s.cfg.AllowLocalOrigin
 	return &websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -99,10 +103,13 @@ func (s *Server) upgrader() *websocket.Upgrader {
 					return true
 				}
 			}
-			// Permit local development from common dev ports.
-			for _, p := range []string{"http://localhost", "http://127.0.0.1"} {
-				if origin == p || (len(origin) > len(p) && origin[:len(p)] == p && origin[len(p)] == ':') {
-					return true
+			// Permit localhost only when AllowLocalOrigin is enabled (default true).
+			// Set ALLOW_LOCAL_ORIGIN=false in production to enforce strict origins.
+			if allowLocal {
+				for _, p := range []string{"http://localhost", "http://127.0.0.1"} {
+					if origin == p || (len(origin) > len(p) && origin[:len(p)] == p && origin[len(p)] == ':') {
+						return true
+					}
 				}
 			}
 			return false
@@ -321,8 +328,8 @@ func parseProcess(pMap map[string]interface{}) (*process.Process, error) {
 	if arrival < 0 {
 		return nil, errors.New("arrivalTime must be >= 0")
 	}
-	if burst < 0 {
-		return nil, errors.New("burstTime must be >= 0")
+	if burst <= 0 {
+		return nil, errors.New("burstTime must be >= 1")
 	}
 	if pid < 0 {
 		return nil, errors.New("pid must be >= 0")
@@ -408,6 +415,12 @@ func (s *Server) handleInit(wc *wsConn, msg map[string]interface{}) {
 			}
 			parsedProcs = append(parsedProcs, proc)
 		}
+	}
+
+	// Require at least one process before touching the running simulator.
+	if len(parsedProcs) == 0 {
+		s.sendError(wc, "at least one process is required")
+		return
 	}
 
 	// Stop the prior simulator (if any) before replacing it, so its engine
@@ -598,10 +611,20 @@ func (s *Server) sendError(wc *wsConn, message string) {
 	}
 }
 
-// HandleHealth returns server health status
+// HandleHealth returns server health status. Returns 503 when the server is
+// shutting down so Kubernetes readiness probes stop routing traffic.
 func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+
+	// Report degraded when Shutdown() has been called.
+	select {
+	case <-s.closed:
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "degraded", "reason": "shutting down"})
+		return
+	default:
+	}
 
 	s.mu.RLock()
 	clientCount := len(s.clients)
