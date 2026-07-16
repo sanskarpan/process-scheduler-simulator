@@ -28,13 +28,21 @@ type SimulationConfig struct {
 	Processes   []ProcessInput `json:"processes"`
 }
 
+// IOBurstInput is the JSON shape for a single I/O burst in a process.
+// Duration=0 entries are skipped by the simulator.
+type IOBurstInput struct {
+	AfterCPUTime int `json:"afterCPUTime"`
+	Duration     int `json:"duration"`
+}
+
 // ProcessInput is the JSON shape for a process in a simulation request.
 type ProcessInput struct {
-	PID      int    `json:"pid"`
-	Name     string `json:"name"`
-	Arrival  int    `json:"arrivalTime"`
-	Burst    int    `json:"burstTime"`
-	Priority int    `json:"priority"`
+	PID      int            `json:"pid"`
+	Name     string         `json:"name"`
+	Arrival  int            `json:"arrivalTime"`
+	Burst    int            `json:"burstTime"`
+	Priority int            `json:"priority"`
+	IOBursts []IOBurstInput `json:"ioBursts,omitempty"`
 }
 
 // Store keeps the last `capacity` completed simulation records in memory.

@@ -117,7 +117,16 @@ func (h *Handler) handleSimulate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, vErr.Error())
 			return
 		}
-		sim.AddProcess(process.NewProcess(p.PID, p.Name, p.Arrival, p.Burst, p.Priority))
+		proc := process.NewProcess(p.PID, p.Name, p.Arrival, p.Burst, p.Priority)
+		for _, b := range p.IOBursts {
+			if b.Duration > 0 {
+				proc.IOBursts = append(proc.IOBursts, process.IOBurst{
+					AfterCPUTime: b.AfterCPUTime,
+					Duration:     b.Duration,
+				})
+			}
+		}
+		sim.AddProcess(proc)
 	}
 
 	metrics.SimStarted(name)
