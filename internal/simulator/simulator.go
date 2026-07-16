@@ -25,6 +25,7 @@ type Simulator struct {
 	scheduler       scheduler.Scheduler
 	processes       []*process.Process
 	readyQueue      []*process.Process
+	ioQueue         []*process.Process // processes blocked on I/O
 	currentProcess  *process.Process
 	currentTime     int
 	ganttChart      []process.GanttEntry
@@ -48,6 +49,7 @@ type SimulationUpdate struct {
 	CurrentTime     int                        `json:"currentTime"`
 	CurrentProcess  *process.Process           `json:"currentProcess"`
 	ReadyQueue      []*process.Process         `json:"readyQueue"`
+	WaitingQueue    []*process.Process         `json:"waitingQueue"`
 	CompletedProces []*process.Process         `json:"completedProcesses"`
 	GanttChart      []process.GanttEntry       `json:"ganttChart"`
 	Events          []process.ProcessEvent     `json:"events"`
@@ -62,6 +64,7 @@ func NewSimulator(scheduler scheduler.Scheduler) *Simulator {
 		scheduler:       scheduler,
 		processes:       make([]*process.Process, 0),
 		readyQueue:      make([]*process.Process, 0),
+		ioQueue:         make([]*process.Process, 0),
 		ganttChart:      make([]process.GanttEntry, 0),
 		events:          make([]process.ProcessEvent, 0),
 		state:           SimStateIdle,
@@ -220,6 +223,7 @@ func (s *Simulator) Reset() {
 	s.currentTime = 0
 	s.currentProcess = nil
 	s.readyQueue = make([]*process.Process, 0)
+	s.ioQueue = make([]*process.Process, 0)
 	s.ganttChart = make([]process.GanttEntry, 0)
 	s.events = make([]process.ProcessEvent, 0)
 	s.contextSwitches = 0
@@ -243,6 +247,11 @@ func (s *Simulator) Reset() {
 		s.processes[i].LastExecuted = 0
 		s.processes[i].TimeQuantum = 0
 		s.processes[i].CurrentIOIndex = 0
+		s.processes[i].IORemaining = 0
+		// Reset IOBurst completion flags so they can fire again.
+		for j := range s.processes[i].IOBursts {
+			s.processes[i].IOBursts[j].Completed = false
+		}
 	}
 }
 
@@ -337,6 +346,10 @@ func (s *Simulator) executeTimeUnit() {
 	// Check for new arrivals
 	s.checkArrivals()
 
+	// Advance I/O countdowns and move any finished processes back to the ready
+	// queue before scheduling so they can be picked this tick.
+	s.tickIOQueue()
+
 	// Schedule next process if needed
 	if s.currentProcess == nil || s.currentProcess.IsComplete() {
 		s.scheduleNextProcess()
@@ -351,8 +364,17 @@ func (s *Simulator) executeTimeUnit() {
 		s.executeProcess(1)
 		s.timeQuantumUsed++
 
+		// After execution, check whether the process should begin an I/O burst.
+		// This must run before the quantum-expiry check so that a process that
+		// both hits an I/O trigger and exhausts its quantum transitions to I/O
+		// (the quantum check skips a nil currentProcess).
+		s.checkIOBurst()
+
 		// Check time quantum expiration (Round-Robin, CFS, MLFQ, ...).
-		timeQuantum := s.scheduler.QuantumFor(s.currentProcess)
+		timeQuantum := 0
+		if s.currentProcess != nil {
+			timeQuantum = s.scheduler.QuantumFor(s.currentProcess)
+		}
 		if timeQuantum > 0 && s.timeQuantumUsed >= timeQuantum && s.currentProcess != nil {
 			// Time quantum expired. Notify the scheduler so it can demote the
 			// process (e.g. MLFQ) before re-queueing.
@@ -479,6 +501,58 @@ func (s *Simulator) executeProcess(duration int) {
 	}
 }
 
+// tickIOQueue decrements the remaining I/O time for each waiting process. When
+// a process finishes its I/O burst it is moved back to the ready queue so that
+// it can be scheduled this same tick (before the CPU selection below).
+func (s *Simulator) tickIOQueue() {
+	live := s.ioQueue[:0]
+	for _, p := range s.ioQueue {
+		p.IORemaining--
+		if p.IORemaining <= 0 {
+			p.IORemaining = 0
+			p.State = process.StateReady
+			s.readyQueue = append(s.readyQueue, p)
+			s.scheduler.AddProcess(p)
+			s.addEvent("io_complete", p.PID,
+				fmt.Sprintf("Process %d I/O complete, returning to ready queue", p.PID))
+		} else {
+			live = append(live, p)
+		}
+	}
+	s.ioQueue = live
+}
+
+// checkIOBurst examines the current process (if any) to see whether it has
+// reached the CPU-time threshold for its next I/O burst. If so, the process
+// transitions to StateWaiting and is moved to ioQueue, clearing currentProcess.
+func (s *Simulator) checkIOBurst() {
+	p := s.currentProcess
+	if p == nil || p.IsComplete() {
+		return
+	}
+	// cpuUsed = total CPU time consumed so far.
+	cpuUsed := p.BurstTime - p.RemainingTime
+	for p.CurrentIOIndex < len(p.IOBursts) {
+		burst := &p.IOBursts[p.CurrentIOIndex]
+		if burst.Completed {
+			p.CurrentIOIndex++
+			continue
+		}
+		if cpuUsed >= burst.AfterCPUTime && burst.Duration > 0 {
+			burst.Completed = true
+			p.IORemaining = burst.Duration
+			p.CurrentIOIndex++
+			p.State = process.StateWaiting
+			s.ioQueue = append(s.ioQueue, p)
+			s.addEvent("io_start", p.PID,
+				fmt.Sprintf("Process %d started I/O (duration=%d)", p.PID, burst.Duration))
+			s.currentProcess = nil
+			s.timeQuantumUsed = 0
+		}
+		break
+	}
+}
+
 // addGanttEntry adds an entry to the Gantt chart
 func (s *Simulator) addGanttEntry(pid int, name string, start, end int, color string) {
 	// Merge with previous entry if same process
@@ -564,6 +638,12 @@ func (s *Simulator) snapshotState() *SimulationUpdate {
 		readyClone[i] = p.Clone()
 	}
 
+	// Clone I/O waiting queue
+	waitingClone := make([]*process.Process, len(s.ioQueue))
+	for i, p := range s.ioQueue {
+		waitingClone[i] = p.Clone()
+	}
+
 	// Clone current process
 	var currentClone *process.Process
 	if s.currentProcess != nil {
@@ -580,6 +660,7 @@ func (s *Simulator) snapshotState() *SimulationUpdate {
 		CurrentTime:     s.currentTime,
 		CurrentProcess:  currentClone,
 		ReadyQueue:      readyClone,
+		WaitingQueue:    waitingClone,
 		CompletedProces: completed,
 		GanttChart:      ganttClone,
 		Events:          eventsClone,
