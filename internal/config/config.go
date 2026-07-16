@@ -15,10 +15,10 @@ import (
 type Config struct {
 	// HTTP
 	Port            string        // listen port, e.g. ":8082"
-	ReadTimeout     time.Duration // header read timeout
-	WriteTimeout    time.Duration // write timeout (0 = no deadline, needed for WS)
+	ReadTimeout     time.Duration // header + body read timeout
+	WriteTimeout    time.Duration // write timeout (30 s for REST; WS uses per-message deadlines)
 	IdleTimeout     time.Duration // keep-alive idle timeout
-	ShutdownTimeout time.Duration
+	ShutdownTimeout time.Duration // graceful-shutdown drain window
 
 	// Static files
 	StaticDir string // absolute or relative path to web/static
@@ -36,11 +36,15 @@ type Config struct {
 	MaxClients          int // 0 = unlimited
 
 	// WebSocket
-	WSReadLimit   int64         // max inbound message bytes
-	WSWriteWait   time.Duration // write deadline
-	WSPongWait    time.Duration // read deadline (pong)
-	WSPingPeriod  time.Duration // ping interval
-	WSOriginAllow []string      // allowed origins beyond same-origin
+	WSReadLimit      int64         // max inbound message bytes
+	WSWriteWait      time.Duration // write deadline per message
+	WSPongWait       time.Duration // read deadline (pong)
+	WSPingPeriod     time.Duration // ping interval
+	WSOriginAllow    []string      // additional allowed origins (beyond same-origin)
+	AllowLocalOrigin bool          // permit localhost/127.0.0.1 origins (for dev)
+
+	// API hardening
+	SimConcurrencyLimit int // max concurrent /api/simulate goroutines (0 = unlimited)
 
 	// Feature flags
 	EnableMetrics bool // expose /metrics
@@ -51,7 +55,7 @@ func Default() Config {
 	return Config{
 		Port:                ":8082",
 		ReadTimeout:         5 * time.Second,
-		WriteTimeout:        0,
+		WriteTimeout:        30 * time.Second,
 		IdleTimeout:         120 * time.Second,
 		ShutdownTimeout:     5 * time.Second,
 		StaticDir:           "./web/static",
@@ -66,6 +70,8 @@ func Default() Config {
 		WSPongWait:          60 * time.Second,
 		WSPingPeriod:        30 * time.Second,
 		WSOriginAllow:       nil,
+		AllowLocalOrigin:    true,
+		SimConcurrencyLimit: 10,
 		EnableMetrics:       true,
 	}
 }
@@ -122,6 +128,30 @@ func FromEnv() Config {
 			}
 		}
 	}
+	// Timeout overrides via environment.
+	parseDur := func(env string, dst *time.Duration) {
+		if v := os.Getenv(env); v != "" {
+			if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				*dst = d
+			}
+		}
+	}
+	parseDur("READ_TIMEOUT", &c.ReadTimeout)
+	parseDur("WRITE_TIMEOUT", &c.WriteTimeout)
+	parseDur("IDLE_TIMEOUT", &c.IdleTimeout)
+	parseDur("SHUTDOWN_TIMEOUT", &c.ShutdownTimeout)
+	parseDur("WS_WRITE_WAIT", &c.WSWriteWait)
+	parseDur("WS_PONG_WAIT", &c.WSPongWait)
+	parseDur("WS_PING_PERIOD", &c.WSPingPeriod)
+
+	if v := os.Getenv("ALLOW_LOCAL_ORIGIN"); v != "" {
+		c.AllowLocalOrigin = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("SIM_CONCURRENCY_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.SimConcurrencyLimit = n
+		}
+	}
 	return c
 }
 
@@ -152,14 +182,13 @@ func (c Config) Validate() (Config, error) {
 	if c.IdleTimeout <= 0 {
 		return c, fmt.Errorf("idle_timeout must be positive")
 	}
-	if c.WSPongPeriodValid() != nil {
-		return c, c.WSPongPeriodValid()
+	if err := c.WSPongPeriodValid(); err != nil {
+		return c, err
 	}
 	return c, nil
 }
 
-// WSPongPeriodValid returns nil if the ping/pong config is internally
-// consistent.
+// WSPongPeriodValid returns nil if the ping/pong config is internally consistent.
 func (c Config) WSPongPeriodValid() error {
 	if c.WSPingPeriod >= c.WSPongWait {
 		return fmt.Errorf("ws_ping_period (%s) must be < ws_pong_wait (%s)", c.WSPingPeriod, c.WSPongWait)

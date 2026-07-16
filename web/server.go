@@ -82,6 +82,7 @@ func NewServer(cfg config.Config) *Server {
 // pointer receiver.
 func (s *Server) upgrader() *websocket.Upgrader {
 	allowed := s.cfg.WSOriginAllow
+	allowLocal := s.cfg.AllowLocalOrigin
 	return &websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -99,10 +100,13 @@ func (s *Server) upgrader() *websocket.Upgrader {
 					return true
 				}
 			}
-			// Permit local development from common dev ports.
-			for _, p := range []string{"http://localhost", "http://127.0.0.1"} {
-				if origin == p || (len(origin) > len(p) && origin[:len(p)] == p && origin[len(p)] == ':') {
-					return true
+			// Permit localhost only when AllowLocalOrigin is enabled (default true).
+			// Set ALLOW_LOCAL_ORIGIN=false in production to enforce strict origins.
+			if allowLocal {
+				for _, p := range []string{"http://localhost", "http://127.0.0.1"} {
+					if origin == p || (len(origin) > len(p) && origin[:len(p)] == p && origin[len(p)] == ':') {
+						return true
+					}
 				}
 			}
 			return false
