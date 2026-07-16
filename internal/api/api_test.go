@@ -12,7 +12,7 @@ import (
 
 func newTestHandler(t *testing.T) (*Handler, *http.ServeMux) {
 	t.Helper()
-	h := NewHandler(store.New(10), 4, 1)
+	h := NewHandler(store.New(10), 4, 1, 0)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	return h, mux

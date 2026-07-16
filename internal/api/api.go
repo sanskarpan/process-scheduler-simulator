@@ -27,11 +27,18 @@ type Handler struct {
 	store          *store.Store
 	defaultQuantum int
 	defaultSpeed   int
+	simSem         chan struct{} // limits concurrent simulation goroutines (nil = unlimited)
 }
 
 // NewHandler returns a REST API handler.
-func NewHandler(s *store.Store, defaultQuantum, defaultSpeed int) *Handler {
-	return &Handler{store: s, defaultQuantum: defaultQuantum, defaultSpeed: defaultSpeed}
+// concurrencyLimit caps the number of simultaneous POST /api/simulate calls;
+// 0 means unlimited.
+func NewHandler(s *store.Store, defaultQuantum, defaultSpeed, concurrencyLimit int) *Handler {
+	var sem chan struct{}
+	if concurrencyLimit > 0 {
+		sem = make(chan struct{}, concurrencyLimit)
+	}
+	return &Handler{store: s, defaultQuantum: defaultQuantum, defaultSpeed: defaultSpeed, simSem: sem}
 }
 
 // Register routes on the given mux. Routes use Go 1.22+ method+pattern routing.
@@ -89,6 +96,17 @@ func (h *Handler) handleAlgorithms(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleSimulate(w http.ResponseWriter, r *http.Request) {
+	// Concurrency guard: reject if at capacity rather than queuing indefinitely.
+	if h.simSem != nil {
+		select {
+		case h.simSem <- struct{}{}:
+			defer func() { <-h.simSem }()
+		default:
+			writeError(w, http.StatusServiceUnavailable, "server busy: too many concurrent simulations")
+			return
+		}
+	}
+
 	var req simulateRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())

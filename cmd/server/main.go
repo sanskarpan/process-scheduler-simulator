@@ -55,7 +55,7 @@ func main() {
 	historyStore := store.New(100)
 
 	// REST API handler.
-	apiHandler := api.NewHandler(historyStore, cfg.DefaultTimeQuantum, cfg.DefaultSpeed)
+	apiHandler := api.NewHandler(historyStore, cfg.DefaultTimeQuantum, cfg.DefaultSpeed, cfg.SimConcurrencyLimit)
 
 	// Build the HTTP mux. Go 1.22+ method+pattern routing is used.
 	mux := http.NewServeMux()

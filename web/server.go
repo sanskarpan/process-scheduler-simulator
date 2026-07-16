@@ -608,10 +608,20 @@ func (s *Server) sendError(wc *wsConn, message string) {
 	}
 }
 
-// HandleHealth returns server health status
+// HandleHealth returns server health status. Returns 503 when the server is
+// shutting down so Kubernetes readiness probes stop routing traffic.
 func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+
+	// Report degraded when Shutdown() has been called.
+	select {
+	case <-s.closed:
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "degraded", "reason": "shutting down"})
+		return
+	default:
+	}
 
 	s.mu.RLock()
 	clientCount := len(s.clients)
