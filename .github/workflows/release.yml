@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build, publish, and release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Determine version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        run: go test -race -count=1 ./...
+
+      - name: Build cross-platform binaries
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          mkdir -p dist
+          for GOOS in linux darwin; do
+            for GOARCH in amd64 arm64; do
+              OUT="dist/scheduler-server-${GOOS}-${GOARCH}"
+              CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
+                go build -trimpath \
+                  -ldflags="-s -w -X main.buildVersion=${VERSION}" \
+                  -o "$OUT" ./cmd/server
+              echo "Built $OUT"
+            done
+          done
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: VERSION=${{ steps.version.outputs.VERSION }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}:latest
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ## Process Scheduler Simulator ${{ steps.version.outputs.VERSION }}
+
+            Docker image: `ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}`
+
+            ### Quick start
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+            docker run -p 8082:8082 ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+            ```
