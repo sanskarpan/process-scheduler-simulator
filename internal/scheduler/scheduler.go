@@ -187,34 +187,79 @@ func (s *RoundRobinScheduler) QuantumFor(p *process.Process) int   { return s.ti
 func (s *RoundRobinScheduler) OnQuantumExpired(p *process.Process) {}
 func (s *RoundRobinScheduler) Reset()                              {}
 
-// PriorityScheduler implements Priority scheduling (preemptive)
+// PriorityScheduler implements Priority scheduling (preemptive or non-preemptive)
+// with optional aging to prevent starvation. Every agingInterval ticks that a
+// process spends waiting, its effective priority is improved by 1 (lower number
+// = higher priority in this scheduler). Effective priority never goes below 0.
+// Aging is stateless: it derives wait time from p.ArrivalTime / p.LastExecuted
+// rather than maintaining internal per-process counters.
 type PriorityScheduler struct {
-	name       string
-	preemptive bool
+	name          string
+	preemptive    bool
+	agingInterval int // ticks of waiting per +1 boost; 0 disables aging
 }
 
+// NewPriorityScheduler creates a priority scheduler with aging enabled at a
+// default interval of 10 ticks.
 func NewPriorityScheduler(preemptive bool) *PriorityScheduler {
+	return newPriorityScheduler(preemptive, 10)
+}
+
+// NewPrioritySchedulerWithAging creates a priority scheduler with a custom
+// aging interval. Pass agingInterval=0 to disable aging entirely.
+func NewPrioritySchedulerWithAging(preemptive bool, agingInterval int) *PriorityScheduler {
+	return newPriorityScheduler(preemptive, agingInterval)
+}
+
+func newPriorityScheduler(preemptive bool, agingInterval int) *PriorityScheduler {
 	mode := "Non-Preemptive"
 	if preemptive {
 		mode = "Preemptive"
 	}
 	return &PriorityScheduler{
-		name:       fmt.Sprintf("Priority (%s)", mode),
-		preemptive: preemptive,
+		name:          fmt.Sprintf("Priority (%s)", mode),
+		preemptive:    preemptive,
+		agingInterval: agingInterval,
 	}
+}
+
+// effectivePriority returns the aging-adjusted priority for p at currentTime.
+// For every agingInterval ticks the process has spent waiting (not running),
+// its priority is improved by 1. The result is clamped to >= 0.
+func (s *PriorityScheduler) effectivePriority(p *process.Process, currentTime int) int {
+	if s.agingInterval <= 0 {
+		return p.Priority
+	}
+	// lastActivity is the later of arrival and last execution; it marks the
+	// point at which the process most recently began waiting.
+	lastActivity := p.ArrivalTime
+	if p.LastExecuted > lastActivity {
+		lastActivity = p.LastExecuted
+	}
+	waited := currentTime - lastActivity
+	if waited < 0 {
+		waited = 0
+	}
+	eff := p.Priority - waited/s.agingInterval
+	if eff < 0 {
+		eff = 0
+	}
+	return eff
 }
 
 func (s *PriorityScheduler) Schedule(readyQueue []*process.Process, currentTime int) *process.Process {
 	if len(readyQueue) == 0 {
 		return nil
 	}
-	// Select process with highest priority (lower number = higher priority)
+	// Select process with highest effective priority (lowest number).
+	// Tie-break by arrival time for FIFO fairness.
 	highest := readyQueue[0]
+	highestEff := s.effectivePriority(readyQueue[0], currentTime)
 	for _, p := range readyQueue[1:] {
-		if p.Priority < highest.Priority {
+		eff := s.effectivePriority(p, currentTime)
+		if eff < highestEff || (eff == highestEff && p.ArrivalTime < highest.ArrivalTime) {
 			highest = p
-		} else if p.Priority == highest.Priority && p.ArrivalTime < highest.ArrivalTime {
-			highest = p
+			highestEff = eff
 		}
 	}
 	return highest
@@ -226,9 +271,9 @@ func (s *PriorityScheduler) Preempt(current *process.Process, readyQueue []*proc
 	if !s.preemptive || current == nil {
 		return false
 	}
-	// Check if any ready process has higher priority
+	currentEff := s.effectivePriority(current, currentTime)
 	for _, p := range readyQueue {
-		if p.PID != current.PID && p.Priority < current.Priority {
+		if p.PID != current.PID && s.effectivePriority(p, currentTime) < currentEff {
 			return true
 		}
 	}

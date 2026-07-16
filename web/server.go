@@ -58,6 +58,11 @@ type Server struct {
 	server    *http.Server
 	closed    chan struct{}
 	closeOnce sync.Once
+	// clientWg tracks all HandleWebSocket goroutines so Shutdown can wait for
+	// them to exit before closing s.broadcast. Sending to a closed channel
+	// concurrently is a data race; waiting for handlers ensures no goroutine
+	// can send after the channel is closed.
+	clientWg sync.WaitGroup
 }
 
 // NewServer creates a new server with the given configuration.
@@ -139,6 +144,9 @@ func (s *Server) unregisterClient(wc *wsConn) {
 
 // HandleWebSocket handles WebSocket connections.
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	s.clientWg.Add(1)
+	defer s.clientWg.Done()
+
 	conn, err := s.upgrader().Upgrade(w, r, nil)
 	if err != nil {
 		logging.FromContext(r.Context()).Warn("websocket upgrade error", "error", err)
@@ -319,7 +327,32 @@ func parseProcess(pMap map[string]interface{}) (*process.Process, error) {
 	if pid < 0 {
 		return nil, errors.New("pid must be >= 0")
 	}
-	return process.NewProcess(pid, name, arrival, burst, priority), nil
+	p := process.NewProcess(pid, name, arrival, burst, priority)
+
+	// Parse optional ioBursts list.
+	if burstList, ok := pMap["ioBursts"].([]interface{}); ok {
+		for _, item := range burstList {
+			bMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			afterCPU := 0
+			dur := 0
+			if v, ok := bMap["afterCPUTime"].(float64); ok {
+				afterCPU = int(v)
+			}
+			if v, ok := bMap["duration"].(float64); ok {
+				dur = int(v)
+			}
+			if dur > 0 {
+				p.IOBursts = append(p.IOBursts, process.IOBurst{
+					AfterCPUTime: afterCPU,
+					Duration:     dur,
+				})
+			}
+		}
+	}
+	return p, nil
 }
 
 // handleInit initializes the simulator with algorithm and processes.
@@ -596,22 +629,30 @@ func (s *Server) Shutdown() {
 	s.closeOnce.Do(func() {
 		close(s.closed)
 
-		// Stop the simulator BEFORE closing the broadcast channel. The run()
-		// goroutine's update callback sends to s.broadcast; sending on a closed
-		// channel panics even inside a select, so we must guarantee run() has
-		// exited (via wg.Wait inside Stop) before we close the channel.
+		// Stop the simulator so its run() goroutine exits. run()'s update
+		// callback sends to s.broadcast; we must guarantee it has exited
+		// (via wg.Wait inside Stop) before we close the channel.
 		if sim := s.getSimulator(); sim != nil {
 			sim.Stop()
 		}
 
-		close(s.broadcast) // safe now: run() has exited and won't send again
-
+		// Close all WebSocket connections. This causes the ReadJSON calls
+		// inside the HandleWebSocket loops to return an error, which breaks
+		// the loop and triggers each goroutine's deferred cleanup.
 		s.mu.Lock()
 		for wc := range s.clients {
 			_ = wc.conn.Close()
 			delete(s.clients, wc)
 		}
 		s.mu.Unlock()
+
+		// Wait for all HandleWebSocket goroutines to fully exit. This
+		// guarantees that no handler goroutine is mid-select on s.broadcast
+		// when we call close below. Concurrent close+send on a channel is a
+		// data race; this wait eliminates it.
+		s.clientWg.Wait()
+
+		close(s.broadcast) // safe now: run() exited + all handlers exited
 
 		if s.server != nil {
 			_ = s.server.Close()
