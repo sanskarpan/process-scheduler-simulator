@@ -1,3 +1,7 @@
+// Package simulator implements a discrete-tick CPU scheduling simulation
+// engine. It drives a Scheduler implementation through arrival, preemption,
+// I/O burst, and completion events, emitting a SimulationUpdate after each
+// tick via a caller-supplied callback.
 package simulator
 
 import (

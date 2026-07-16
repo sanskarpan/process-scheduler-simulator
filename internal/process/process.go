@@ -1,3 +1,6 @@
+// Package process defines the Process type, I/O burst records, Gantt chart
+// entries, event log entries, and aggregate scheduling metrics used throughout
+// the simulator.
 package process
 
 import (

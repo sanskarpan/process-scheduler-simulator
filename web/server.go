@@ -1,3 +1,6 @@
+// Package web implements the WebSocket simulation server. A single Server
+// instance manages one active Simulator, broadcasts state updates to all
+// connected clients, and translates JSON messages into simulator commands.
 package web
 
 import (
